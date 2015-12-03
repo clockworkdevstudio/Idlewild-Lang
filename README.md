@@ -37,8 +37,11 @@ INSTALL FROM SOURCE (LINUX)
 To compile and install the language on a (RECENT!) Ubuntu host:
 
 sudo apt-get install ghc libghc-mtl-dev libglib2.0-dev libgtk-3-dev libsdl2-dev libsdl2-image-2.0-0 libsdl2-image-dev libsdl2-ttf-2.0-0 libsdl2-ttf-dev libsdl2-mixer-2.0-0 libsdl2-mixer-dev freeglut3-dev pkg-config libglew-dev libglm-dev
+
 make
+
 chmod +x ./install-linux.sh
+
 sudo ./install-linux.sh
 
 Assuming you have a working assembler (NASM or FASM), reachable from within your PATH environment variable, this is all you need to do.
@@ -48,26 +51,47 @@ INSTALL FROM SOURCE (WINDOWS)
 The same sources used to compile Idlewild-Lang on Linux can be used to build it on Windows. However, you will need to download all the disparate dependencies "manually" from the web. If you're brave enough to try a Windows build, you'll need the following .dlls
 
 freeglut.dll
+
 glew32.dll
+
 libFLAC-8.dll
+
 libfreetype-6.dll
+
 libglib-2.0-0.dll
+
 libiconv-2.dll
+
 libintl-8.dll
+
 libjpeg-9.dll
+
 libmikmod-2.dll
+
 libmodplug-1.dll
+
 libogg-0.dll
+
 libpng16-16.dll
+
 libtiff-5.dll
+
 libvorbis-0.dll
+
 libvorbisfile-3.dll
+
 libwebp-4.dll
+
 SDL2.dll
+
 SDL2_image.dll
+
 SDL2_mixer.dll
+
 SDL2_ttf.dll
+
 smpeg2.dll
+
 zlib1.dll
 
 These should go in C:\Windows\System32.
@@ -75,6 +99,7 @@ These should go in C:\Windows\System32.
 In addition, you'll need all the corresponding C header files, the Glasgow Haskell Compiler, and Cygwin. You'll also need an assembler (NASM or FASM) reachable from within your PATH environment variable, as well as the linker GoLink.exe. Then you need to issue the command:
 
 make windows
+
 install-windows.bat
 
 (from a Cygwin admin shell.)
@@ -102,8 +127,11 @@ DISTRIBUTING IDLEWILD-LANG PROGRAMS
 If you compiled a program with the --console option, it will have the minimal (core) dependencies (Windows assumed):
 
 libkoshka.core.dll
+
 libglib-2.0-0.dll
+
 libintl-8.dll
+
 libiconv-2.dll
 
 Otherwise, it will have the above core dependencies and, additionally, the other .dlls mentioned above.
