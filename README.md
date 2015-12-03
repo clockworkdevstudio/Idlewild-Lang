@@ -30,7 +30,7 @@ GENERAL LANGUAGE FEATURES
 
 INSTALL FROM BINARY PACKAGES
 
-I hope to upload binary packages soon to make installation much easier on all supported OSs.
+There is a binary package for Linux available under "releases" which obviates the need for some Linux programming tools. I hope to upload a binary package for Windows soon to make installation much easier on all supported OSs.
 
 INSTALL FROM SOURCE (LINUX)
 
