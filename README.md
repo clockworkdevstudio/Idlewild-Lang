@@ -13,8 +13,8 @@ DIFFERENCES FROM BLITZ BASIC
 
 GENERAL LANGUAGE FEATURES
 
-- Four native 64-bit data types (int, float `[technically, "double"]`, pointer, and UTF-8 string).
-- All the operators you would expect from a modern language (Arithmetic operators: +, -, \*, /, Mod, ^ `["to-the-power-of"]`; Bitwise operators: And, Or, Xor, ~ `[bitwise complement]`; Logical operator: Not; Comparision operators: >, <, =, >=, <=, <>; Assignment operator: =; Type conversion operators: Int(), Float(), Str(); Unary negate/abs: -, +; Bit-shifting operators: Shl, Shr, Sar; Precedence override operator: (); Function call operator: f(); New operator; Type-field-access operator: \; Linked list manipulation operators: First, Last, Before, After).
+- Four native 64-bit data types (int, float (technically, "double"), pointer, and UTF-8 string).
+- All the operators you would expect from a modern language (Arithmetic operators: +, -, \*, /, Mod, ^ ("to-the-power-of"); Bitwise operators: And, Or, Xor, ~ (bitwise complement); Logical operator: Not; Comparision operators: >, <, =, >=, <=, <>; Assignment operator: =; Type conversion operators: Int(), Float(), Str(); Unary negate/abs: -, +; Bit-shifting operators: Shl, Shr, Sar; Precedence override operator: (); Function call operator: f(); New operator; Type-field-access operator: \; Linked list manipulation operators: First, Last, Before, After).
 - Built-in constants True, False, Pi and Null.
 - Support for hexadecimal and binary constants.
 - Arrays of any data type and any practical dimensionality, and the ability to re-dimension arrays.
@@ -28,9 +28,25 @@ GENERAL LANGUAGE FEATURES
 - Branching with "Goto", "Gosub" and "On... Goto/Gosub" ("On... Goto/Gosub" statement uses jump tables for constant-time O(1) branching).
 - Support for global, local and constant "variables".
 
-INSTALL FROM BINARY PACKAGES
+BINARY PACKAGES
 
-There is a binary package for Linux available under "releases" which obviates the need for some Linux programming tools. I hope to upload a binary package for Windows soon to make installation much easier on all supported OSs.
+Binary packages are available; make sure you don't download the source code by accident.
+
+INSTALL FROM BINARY PACKAGE (LINUX)
+
+Run the following commands:
+
+sudo apt-get install libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0
+
+chmod +x ./install-linux.sh
+
+sudo ./install-linux.sh
+
+INSTALL FROM BINARY PACKAGE (WINDOWS)
+
+Run the following command from an administrator command prompt:
+
+install-windows-bin.bat
 
 INSTALL FROM SOURCE (LINUX)
 
