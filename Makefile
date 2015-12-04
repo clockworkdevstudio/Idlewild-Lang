@@ -65,7 +65,7 @@ libkoshka_mm_io.o: libkoshka_mm_io.c
 libkoshka_mm_text.o: libkoshka_mm_text.c libkoshka_mm.h
 	gcc -c libkoshka_mm_text.c -DLINUX=1 -o libkoshka_mm_text.o -fpic ${GCC_LINUX_FLAGS}
 
-window: windows-release
+windows: windows-release
 
 build-windows: idlewild-lang.exe libkoshka.core.dll libkoshka.mm.dll
 
