@@ -60,6 +60,62 @@ idlewildLangStandardFunctions =
       declareStandardFunction "init_libkoshka_core" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT],
       declareStandardFunction "final_libkoshka_core" VARIABLE_TYPE_INT [],
+
+      declareStandardFunction "createbank" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "freebank" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],      
+      declareStandardFunction "resizebank" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "copybank" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peekbyte" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peekshort" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peekint" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peeklong" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peekfloat" VARIABLE_TYPE_FLOAT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "peekdouble" VARIABLE_TYPE_FLOAT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "pokebyte" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "pokeshort" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "pokeint" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "pokelong" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "pokefloat" VARIABLE_TYPE_FLOAT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_FLOAT],
+      declareStandardFunction "pokedouble" VARIABLE_TYPE_FLOAT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_FLOAT],
       
       declareStandardFunctionVar "graphics" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,

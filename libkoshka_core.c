@@ -59,6 +59,14 @@ double PI = 3.14159265358979323;
 #define BB_DATA_TYPE_STRING 3
 #define BB_OUT_OF_DATA -1
 
+typedef unsigned long long int BB_RESOURCE_HANDLE;
+
+typedef struct
+{
+    unsigned long long int size;
+    unsigned char *data;
+} Bank;
+
 typedef struct
 {
     GList *first;
@@ -190,6 +198,138 @@ int bb_test_function_string2(char *s1,char *s2)
 {
 	printf("%s %s%s",s1,s2,NEW_LINE);
 	return 0;
+}
+
+BB_RESOURCE_HANDLE bb_createbank(unsigned long long int size)
+{
+    Bank *bank;
+    bank = malloc(sizeof(Bank));
+    bank->size = size;
+    bank->data = malloc(size);
+    if(bank->data == 0)
+    {
+	free(bank);
+	return 0;
+    }
+    memset(bank->data,0,size);
+    return (BB_RESOURCE_HANDLE)bank;
+}
+
+unsigned long long int bb_freebank(BB_RESOURCE_HANDLE handle)
+{
+    free(((Bank*)handle)->data);
+    free((Bank*)handle);
+    return 0;
+}
+
+unsigned long long int bb_banksize(BB_RESOURCE_HANDLE handle)
+{
+    return ((Bank*)handle)->size;
+}
+
+unsigned long long int bb_resizebank(BB_RESOURCE_HANDLE handle,unsigned long long int new_size)
+{
+    Bank* bank = (Bank*)handle;
+    void *new_data = malloc(new_size);
+    if(new_data == 0)
+	return 0;
+    
+    if(new_size > bank->size)
+    {
+	memcpy(new_data,bank->data,bank->size);
+	memset(new_data + bank->size,0,new_size - bank->size);
+    }
+    else
+    {
+	memcpy(new_data,bank->data,new_size);
+    }
+    free(bank->data);
+    bank->data = new_data;
+    bank->size = new_size;
+    return 1;    
+}
+
+unsigned long long int bb_copybank(BB_RESOURCE_HANDLE handle1,unsigned long long int offset1,BB_RESOURCE_HANDLE handle2,unsigned long long int offset2,unsigned long long int num_bytes)
+{
+    Bank* bank1 = (Bank*)handle1;
+    Bank* bank2 = (Bank*)handle2;
+
+    if(offset1 + num_bytes > bank1->size)
+	bb_fatal_error("CopyBank source address out of range.");
+    
+    if(offset2 + num_bytes > bank2->size)
+	bb_fatal_error("CopyBank destination address out of range.");
+
+    if(bank1 == bank2)
+	memmove(bank2->data + offset2,bank1->data + offset1,num_bytes);
+    else
+	memcpy(bank2->data + offset2,bank1->data + offset1,num_bytes);
+
+    return 1;
+}
+
+unsigned long long int bb_peekbyte(BB_RESOURCE_HANDLE handle,unsigned long long int offset)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset >= bank->size)
+	bb_fatal_error("PokeByte address out of range.");
+    return (unsigned long long int)(((unsigned char*)bank->data)[offset]);
+}
+
+unsigned long long int bb_pokebyte(BB_RESOURCE_HANDLE handle,unsigned long long int offset,unsigned long long int value)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset >= bank->size)
+	bb_fatal_error("PokeByte address out of range.");
+    ((unsigned char*)bank->data)[offset] = value;
+}
+
+unsigned long long int bb_peekshort(BB_RESOURCE_HANDLE handle,unsigned long long int offset)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 2)
+	bb_fatal_error("PeekShort address out of range.");
+    return (unsigned long long int)*((unsigned short*)(bank->data + offset));
+}
+
+unsigned long long int bb_pokeshort(BB_RESOURCE_HANDLE handle,unsigned long long int offset,unsigned long long int value)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 2)
+	bb_fatal_error("PokeShort address out of range.");
+    *((unsigned short*)(bank->data + offset)) = value;
+}
+
+unsigned long long int bb_peekint(BB_RESOURCE_HANDLE handle,unsigned long long int offset)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 4)
+	bb_fatal_error("PeekInt address out of range.");
+    return (unsigned long long int)*((unsigned int*)(bank->data + offset));
+}
+
+unsigned long long int bb_pokeint(BB_RESOURCE_HANDLE handle,unsigned long long int offset,unsigned long long int value)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 4)
+	bb_fatal_error("PokeInt address out of range.");
+    *((unsigned int*)(bank->data + offset)) = value;
+}
+
+unsigned long long int bb_peeklong(BB_RESOURCE_HANDLE handle,unsigned long long int offset)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 8)
+	bb_fatal_error("PeekLong address out of range.");
+    return *((unsigned long long int*)(bank->data + offset));
+}
+
+unsigned long long int bb_pokelong(BB_RESOURCE_HANDLE handle,unsigned long long int offset,unsigned long long int value)
+{
+    Bank *bank = (Bank*)handle;
+    if(offset > bank->size - 8)
+	bb_fatal_error("PokeLong address out of range.");
+    *((unsigned long long int*)(bank->data + offset)) = value;
 }
 
 double bb_sin(double angle)
