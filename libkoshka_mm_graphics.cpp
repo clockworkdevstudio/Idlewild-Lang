@@ -69,6 +69,7 @@ unsigned long long int BB_CURRENT_BUFFER;
 double BB_SCALE_X;
 double BB_SCALE_Y;
 double BB_ORIENTATION;
+double BB_ALPHA;
 double BB_PI = 3.14159265358979323;
 unsigned long long int BB_AUTOMIDHANDLE;
 long long int BB_PRIMITIVE_HANDLE_X;
@@ -114,6 +115,7 @@ extern "C"
 	BB_SCALE_Y = 1.0f;
 	
 	BB_ORIENTATION = 0.0f;
+	BB_ALPHA = 1.0f;
 
 	BB_AUTOMIDHANDLE = 0;
 	
@@ -153,6 +155,7 @@ extern "C"
 
 	glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_BLEND);
+	
 	glViewport(0,0,width,height);
 	
 	return 0;
@@ -201,6 +204,17 @@ extern "C"
     double bb_getorientation()
     {
 	return BB_ORIENTATION;
+    }
+
+    unsigned long long int bb_setalpha(double a)
+    {
+	BB_ALPHA = a;
+	return 0;
+    }
+
+    double bb_getalpha()
+    {
+	return BB_ALPHA;
     }
     
     unsigned long long int bb_cls()
@@ -336,11 +350,12 @@ char *dummy_error(GLuint error)
 	GLuint vertex_buffer;
 	GLuint index_buffer;
 	GLint matrix_handle;
-	GLfloat x1,y1,x2,y2;
+	GLfloat x1,y1,x2,y2,a;
 	GLint x1_handle;
 	GLint y1_handle;
 	GLint x2_handle;
 	GLint y2_handle;
+	GLint a_handle;
 	GLint texture_handle;
 	GLint position_handle;
 	Image *image = (Image*)image_handle;
@@ -404,7 +419,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.1 %d %s\n",error,dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -414,6 +429,7 @@ char *dummy_error(GLuint error)
 	y1_handle = glGetUniformLocation(IMAGE_PROGRAM,"y1");
 	x2_handle = glGetUniformLocation(IMAGE_PROGRAM,"x2");
 	y2_handle = glGetUniformLocation(IMAGE_PROGRAM,"y2");
+        a_handle = glGetUniformLocation(IMAGE_PROGRAM,"a");
 	position_handle = glGetAttribLocation(IMAGE_PROGRAM, "vPosition");
 	
 	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
@@ -422,11 +438,13 @@ char *dummy_error(GLuint error)
 	y1 = 0.0f;
 	x2 = 1.0f;
 	y2 = 1.0f;
+	a = BB_ALPHA;
 	
 	glUniform1f(x1_handle,x1);
 	glUniform1f(y1_handle,y1);
 	glUniform1f(x2_handle,x2);
 	glUniform1f(y2_handle,y2);
+	glUniform1f(a_handle,a);
 	
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D,image->texture);
@@ -525,7 +543,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -661,7 +679,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.3 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -671,7 +689,7 @@ char *dummy_error(GLuint error)
 	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
 
 	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_COLOR_ALPHA / 255.0f};
+        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
 	glUniform4fv(color_handle, 1, color);
 	
 	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
@@ -768,7 +786,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.4 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -778,7 +796,7 @@ char *dummy_error(GLuint error)
 	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
 
 	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_COLOR_ALPHA / 255.0f};
+        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
 	glUniform4fv(color_handle, 1, color);
 	
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
@@ -896,7 +914,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.5 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -906,7 +924,7 @@ char *dummy_error(GLuint error)
 	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
 
 	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_COLOR_ALPHA / 255.0f};
+        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
 	glUniform4fv(color_handle, 1, color);
 	
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
@@ -1016,7 +1034,7 @@ char *dummy_error(GLuint error)
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx. %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.6 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
@@ -1026,7 +1044,7 @@ char *dummy_error(GLuint error)
 	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
 
 	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_COLOR_ALPHA / 255.0f};
+        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
 	glUniform4fv(color_handle, 1, color);
 	
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
@@ -1129,11 +1147,15 @@ char *dummy_error(GLuint error)
 	      "uniform float y1;",
 	      "uniform float x2;",
 	      "uniform float y2;",
+	      "uniform float a;",
 	      "varying vec2 textureCoordinates;",
 	      "void main() {",
               "  if(1.0 - textureCoordinates.x >= x1 && 1.0 - textureCoordinates.x <= x2 && textureCoordinates.y >= y1 && textureCoordinates.y <= y2)",
               "  {",
-	      "    gl_FragColor = texture(texture_,vec2(1.0 - textureCoordinates.x,textureCoordinates.y));",
+	      "    vec4 k = texture(texture_,vec2(1.0 - textureCoordinates.x,textureCoordinates.y));",
+	      "    if(k.a != 0.0)",
+              "      k.a = a;",
+	      "    gl_FragColor = k;",
 	      "  }",
 	      "  else",
 	      "  {",
@@ -1274,7 +1296,7 @@ char *dummy_error(GLuint error)
 	
 	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
 
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_COLOR_ALPHA / 255.0f};
+        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
 	
 	glUniform4fv(color_handle, 1, color);
 
