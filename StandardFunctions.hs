@@ -152,9 +152,12 @@ idlewildLangStandardFunctions =
          createRequiredParameter [] VARIABLE_TYPE_FLOAT],
       declareStandardFunction "setorientation" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_FLOAT],
+      declareStandardFunction "setalpha" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_FLOAT],
       declareStandardFunction "getscalex" VARIABLE_TYPE_FLOAT [],      
       declareStandardFunction "getscaley" VARIABLE_TYPE_FLOAT [],
       declareStandardFunction "getorientation" VARIABLE_TYPE_FLOAT [],
+      declareStandardFunction "getalpha" VARIABLE_TYPE_FLOAT [],
       
       declareStandardFunction "loadimage" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_STRING],
