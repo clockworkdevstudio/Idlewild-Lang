@@ -1281,12 +1281,18 @@ unsigned long long int bb_new(LinkedList *list)
 
 unsigned long long int bb_first(LinkedList *list)
 {
-    return (unsigned long long int)(list->last->data);
+    if(list->last)
+	return (unsigned long long int)(list->last->data);
+    else
+	return 0;
 }
 
 unsigned long long int bb_last(LinkedList *list)
 {
-    return (unsigned long long int)(list->first->data);
+    if(list->first)
+	return (unsigned long long int)(list->first->data);
+    else
+	return 0;
 }
 
 unsigned long long int bb_before(unsigned long long int *element)
