@@ -28,7 +28,7 @@ SetBuffer BackBuffer()
 
 TIMER = CreateTimer(30)
 
-While Not KeyDown(1)
+While Not KeyHit(1)
 	PINGS = WaitTimer(TIMER)
 	For i = 0 To PINGS
 		Cls
