@@ -82,7 +82,7 @@ link =
            else ["libkoshka.core.dll","libkoshka.mm.dll","user32.dll"]
          goLinkOptions =
            if console
-           then [objectFileName,"/entry","main","/fo",outputFileName,"/console"] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll","shcore.dll"]
+           then [objectFileName,"/entry","main","/fo",outputFileName,"/console"] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll"]
            else [objectFileName,"/entry","main","/fo",outputFileName] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll","shcore.dll"]
      --verboseCommentary ("golink " ++ (concat (intersperse " " goLinkOptions)) ++ "\n") verbose
      f <- liftIO $ openFile "link.bat" WriteMode
