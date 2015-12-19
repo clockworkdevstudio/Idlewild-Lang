@@ -303,7 +303,7 @@ unsigned long long int bb_waittimer(unsigned long long int timer_handle)
 	if(!(elapsed < (1000.0f / timer->frequency)))
 	    break;
 	else
-	    SDL_Delay(3);
+	    SDL_Delay(0);
     } while(1);
 	    
     pings = elapsed / ((long long int)(1000.0f / timer->frequency));

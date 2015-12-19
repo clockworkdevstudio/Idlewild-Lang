@@ -35,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #if WINDOWS==1
 #include <windows.h>
+#include <versionhelpers.h>
 #endif
 
 #include <glib.h>
@@ -104,6 +105,21 @@ void bb_final_libkoshka_core()
 {
     free(BB_GOSUB_STACK);
 }
+
+#if WINDOWS==1
+
+void dpiHack(void)
+{
+    if(IsWindows8Point1OrGreater())
+    {
+        HMODULE shcore = LoadLibraryA("C:\\Windows\\System32\\SHCore.dll");
+        unsigned long long int(*f)(unsigned long long int);
+        f = GetProcAddress(shcore,"SetProcessDpiAwareness");
+        f(2);
+        FreeLibrary(shcore);
+    }
+}
+#endif
 
 void bb_init_gosub(unsigned long long int return_address)
 {

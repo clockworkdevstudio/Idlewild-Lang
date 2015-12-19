@@ -83,7 +83,7 @@ link =
          goLinkOptions =
            if console
            then [objectFileName,"/entry","main","/fo",outputFileName,"/console"] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll"]
-           else [objectFileName,"/entry","main","/fo",outputFileName] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll","shcore.dll"]
+           else [objectFileName,"/entry","main","/fo",outputFileName] ++ standardLibraryNames ++ ["msvcrt.dll","kernel32.dll"]
      --verboseCommentary ("golink " ++ (concat (intersperse " " goLinkOptions)) ++ "\n") verbose
      f <- liftIO $ openFile "link.bat" WriteMode
      liftIO $ hPutStr f ("golink " ++ (concat (intersperse " " goLinkOptions)))

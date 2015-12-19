@@ -205,7 +205,7 @@ putStandardLibraryInit =
        ["push rax\n",
         "mov rcx, 2\n",
         "mov rax, 0\n",
-        "call SetProcessDpiAwareness\n",
+        "call dpiHack\n",
         "pop rax\n"]
 #endif
 
@@ -3948,8 +3948,8 @@ putDirectivesAndFunctionDeclarations =
 
 #if WINDOWS==1
                 putAsmGeneric
-                  ["extrn SetProcessDpiAwareness\n"]
-                  ["extern SetProcessDpiAwareness\n"]
+                  ["extrn dpiHack\n"]
+                  ["extern dpiHack\n"]
 #endif
                 mapM_ externFunctionDeclaration (map snd (Map.toList symbols))
 
