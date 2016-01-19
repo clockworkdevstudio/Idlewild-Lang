@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014-2015, Clockwork Dev Studio
+Copyright (c) 2014-2016, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -37,6 +37,8 @@ extern unsigned long long int BB_COLOR_RED;
 extern unsigned long long int BB_COLOR_GREEN;
 extern unsigned long long int BB_COLOR_BLUE;
 extern unsigned long long int BB_COLOR_ALPHA;
+
+unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y);
 
 TTF_Font *BB_CURRENT_FONT;
 
@@ -98,7 +100,7 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
 	image->handle_y = 0;
     }
 
-    bb_drawimage(image,x,y);
+    bb_drawimage((unsigned long long int)image,x,y);
     
     SDL_FreeSurface(surface);
     glDeleteTextures(1,&texture);

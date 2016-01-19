@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014-2015, Clockwork Dev Studio
+Copyright (c) 2014-2016, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -62,7 +62,10 @@ typedef struct
 } Timer;
 
 void init_scancode_translation();
-
+void bb_init_libkoshka_core(unsigned long long int max_gosub_depth);
+void bb_final_libkoshka_core();
+void bb_fatal_error(char *msg);
+ 
 void bb_init_libkoshka_mm(unsigned long long int max_gosub_depth)
 {
     /*

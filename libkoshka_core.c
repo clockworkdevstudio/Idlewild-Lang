@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014-2015, Clockwork Dev Studio
+Copyright (c) 2014-2016, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -35,6 +35,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #if WINDOWS==1
 #include <windows.h>
+#include <mbstring.h>
 #include <versionhelpers.h>
 #endif
 
@@ -114,7 +115,8 @@ void dpiHack(void)
     {
         HMODULE shcore = LoadLibraryA("C:\\Windows\\System32\\SHCore.dll");
         unsigned long long int(*f)(unsigned long long int);
-        f = GetProcAddress(shcore,"SetProcessDpiAwareness");
+        //HRESULT WINAPI (*f)(int value);
+        f = (unsigned long long int(*)(unsigned long long int))GetProcAddress(shcore,"SetProcessDpiAwareness");
         f(2);
         FreeLibrary(shcore);
     }

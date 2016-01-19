@@ -54,7 +54,7 @@ libkoshka_mm.o: libkoshka_mm.c
 	gcc -c libkoshka_mm.c -DLINUX=1 -o libkoshka_mm.o -fpic `pkg-config --cflags gtk+-3.0` ${GCC_LINUX_FLAGS}
 
 libkoshka_mm_graphics.o: libkoshka_mm_graphics.cpp libkoshka_mm.h
-	g++ -c libkoshka_mm_graphics.cpp -DLINUX=1 -o libkoshka_mm_graphics.o -fpic ${GCC_LINUX_FLAGS}
+	g++ -c libkoshka_mm_graphics.cpp -DLINUX=1 -o libkoshka_mm_graphics.o -fpic  `pkg-config --cflags gtk+-3.0` ${GCC_LINUX_FLAGS}
 
 libkoshka_mm_sound.o: libkoshka_mm_sound.c
 	gcc -c libkoshka_mm_sound.c -DLINUX=1 -o libkoshka_mm_sound.o -fpic ${GCC_LINUX_FLAGS}
@@ -80,13 +80,13 @@ libkoshka_core.obj: libkoshka_core.c
 	x86_64-w64-mingw32-gcc -c libkoshka_core.c -DWINDOWS=1 -DUNICODE -D_UNICODE -o libkoshka_core.obj -fpic ${GCC_WINDOWS_FLAGS}
 
 libkoshka.mm.dll: libkoshka_mm.obj libkoshka_mm_graphics.obj libkoshka_mm_sound.obj libkoshka_mm_io.obj libkoshka_mm_text.obj libkoshka.core.dll
-	x86_64-w64-mingw32-gcc -shared -o libkoshka.mm.dll libkoshka_mm.obj libkoshka_mm_graphics.obj libkoshka_mm_sound.obj libkoshka_mm_io.obj libkoshka_mm_text.obj -L. -lkoshka.core -lSDL2 -lSDL2_image -lSDL2_ttf -lSDL2_mixer -L C:/Windows/System32 -lOpenGL32 -lfreeglut -lglew32 -lmsvcrt -lglib-2.0-0 ${GCC_WINDOWS_FLAGS}
+	x86_64-w64-mingw32-g++ -shared -o libkoshka.mm.dll libkoshka_mm.obj libkoshka_mm_graphics.obj libkoshka_mm_sound.obj libkoshka_mm_io.obj libkoshka_mm_text.obj -L. -lkoshka.core -lSDL2 -lSDL2_image -lSDL2_ttf -lSDL2_mixer -L C:/Windows/System32 -lOpenGL32 -lfreeglut -lglew32 -lmsvcrt -lglib-2.0-0 ${GCC_WINDOWS_FLAGS}
 
 libkoshka_mm.obj: libkoshka_mm.c
 	x86_64-w64-mingw32-gcc -c libkoshka_mm.c -DWINDOWS=1 -o libkoshka_mm.obj -fpic ${GCC_WINDOWS_FLAGS}
 
 libkoshka_mm_graphics.obj: libkoshka_mm_graphics.cpp libkoshka_mm.h
-	g++ -c libkoshka_mm_graphics.cpp -DWINDOWS=1 -o libkoshka_mm_graphics.obj -fpic ${GCC_WINDOWS_FLAGS}
+	x86_64-w64-mingw32-g++ -c libkoshka_mm_graphics.cpp -DWINDOWS=1 -o libkoshka_mm_graphics.obj -fpic ${GCC_WINDOWS_FLAGS}
 
 libkoshka_mm_sound.obj: libkoshka_mm_sound.c
 	x86_64-w64-mingw32-gcc -c libkoshka_mm_sound.c -DWINDOWS=1 -o libkoshka_mm_sound.obj -fpic ${GCC_WINDOWS_FLAGS}

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014-2015, Clockwork Dev Studio
+Copyright (c) 2014-2016, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without

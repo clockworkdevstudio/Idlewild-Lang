@@ -1,9 +1,9 @@
 ; Program demonstrates the use of 3D acceleration (transparency, scaling, rotation) to create a flame effect.
 
-Const GRAPHICS_WIDTH = 640
-Const GRAPHICS_HEIGHT = 480
+Const GRAPHICS_WIDTH = 1024
+Const GRAPHICS_HEIGHT = 768
 Const FLAME_RADIUS = 16
-Const FLAME_CREATE_RATE = 4
+Const FLAME_CREATE_RATE = 5
 Const SPEED# = 5.0
 Const MAX_NUM_FLAMES = 500
 
@@ -27,7 +27,7 @@ Graphics GRAPHICS_WIDTH, GRAPHICS_HEIGHT
 SetBuffer BackBuffer()
 
 TIMER = CreateTimer(30)
-
+	
 While Not KeyHit(1)
 	PINGS = WaitTimer(TIMER)
 	For i = 0 To PINGS
@@ -119,11 +119,7 @@ Function DrawFlames()
 		SetScale Abs(Cos(f\scale#)),Abs(Cos(f\scale#))
 		SetOrientation f\orientation#		
 		Color 255,216 * Abs(Cos(f\intensity)),0
-		If Rand(0,1) = 0
-			Rect f\x#,f\y#,2 * FLAME_RADIUS,2 * FLAME_RADIUS,True
-		Else
-			Oval f\x#,f\y#,2 * FLAME_RADIUS,2 * FLAME_RADIUS,True
-		End If
+		Rect f\x#,f\y#,2 * FLAME_RADIUS,2 * FLAME_RADIUS,True
 	Next
 
 	SetAlpha alpha#

@@ -1,6 +1,6 @@
 /*
 
-Copyright (c) 2014-2015, Clockwork Dev Studio
+Copyright (c) 2014-2016, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -46,9 +46,12 @@ extern "C"
 #include <math.h>
 #include <string>
 #include "libkoshka_mm.h"
+#include <glib.h>
 
 extern "C"
 {
+    void bb_init_libkoshka_core(unsigned long long int max_gosub_depth);
+    void bb_final_libkoshka_core();
     void load_primitive_program();
     void load_image_program();
     GLuint load_shader(GLenum type, const GLchar **shaderCode,int num_lines);
@@ -88,12 +91,74 @@ unsigned long long int BB_CLS_COLOR_ALPHA;
 GLuint PRIMITIVE_PROGRAM;
 GLuint IMAGE_PROGRAM;
 
+GList *GRAPHICS_CACHE;
+
+#define GRAPHICS_TYPE_LINE 1
+#define GRAPHICS_TYPE_RECT 2
+#define GRAPHICS_TYPE_RECT_HOLLOW 3
+#define GRAPHICS_TYPE_OVAL 4
+#define GRAPHICS_TYPE_OVAL_HOLLOW 5
+
+typedef struct
+{
+    unsigned long long int id;
+    void *data;
+} CachedGraphics;
+
+class CachedRect
+{
+public:
+    unsigned long long int id;
+    glm::vec4 vertices[6];
+    glm::vec4 color;
+};
+
+class CachedRectHollow
+{
+public:
+    unsigned long long int id;
+    glm::vec4 vertices[8];
+    glm::vec4 color;
+};
+
+class CachedLine
+{
+public:
+    unsigned long long int id;
+    glm::vec4 vertices[2];
+    glm::vec4 color;
+};
+
+class CachedOval
+{
+public:
+    static unsigned long long int TOTAL_NUM_VERTICES;
+    unsigned long long int id;
+    glm::vec4 *vertices;
+    unsigned long long int num_vertices;
+    glm::vec4 color;
+};
+
+class CachedOvalHollow
+{
+public:
+    static unsigned long long int TOTAL_NUM_VERTICES;
+    unsigned long long int id;
+    glm::vec4 *vertices;
+    unsigned long long int num_vertices;
+    glm::vec4 color;
+};
+
+unsigned long long int CachedOval::TOTAL_NUM_VERTICES;
+unsigned long long int CachedOvalHollow::TOTAL_NUM_VERTICES;
+
 extern "C"
 {
     unsigned long long int bb_graphics(long long int width,long long int height,unsigned long long int depth, unsigned long long int windowed)
     {
+	CachedOval::TOTAL_NUM_VERTICES = 0;
+	CachedOvalHollow::TOTAL_NUM_VERTICES = 0;
 	GLenum glew_error;
-	
 	BB_GRAPHICS_WIDTH = width;
 	BB_GRAPHICS_HEIGHT = height;
 
@@ -157,10 +222,12 @@ extern "C"
 	glEnable(GL_BLEND);
 	
 	glViewport(0,0,width,height);
+
+	GRAPHICS_CACHE = NULL;
 	
 	return 0;
     }
-
+    
     unsigned long long int bb_setbuffer(unsigned long long int buffer)
     {
 	BB_CURRENT_BUFFER = buffer;
@@ -597,6 +664,197 @@ char *dummy_error(GLuint error)
 	else
 	    bb_oval_filled(x,y,width,height);
     }
+
+    unsigned long long int bb_line(long long int x1,long long int y1,long long int x2,long long int y2)
+    {
+	CachedGraphics *cached_graphics;
+	CachedLine *cached_line;
+      	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLenum error;
+	GLuint position_handle;
+	GLuint color_handle;
+	GLuint vertex_stride;
+	GLfloat x1_adjusted,y1_adjusted,x2_adjusted,y2_adjusted;
+	GLuint indices [] = {0,1};
+	GLuint matrix_handle;
+	GLuint color_buffer;
+	GLfloat *colors;
+
+	x1_adjusted = (x1 + BB_ORIGIN_X);
+	y1_adjusted = (BB_GRAPHICS_HEIGHT - y1 - BB_ORIGIN_Y);
+	x2_adjusted = (x2 + BB_ORIGIN_X) - x1_adjusted;
+	y2_adjusted = (BB_GRAPHICS_HEIGHT - y2 - BB_ORIGIN_Y) - y1_adjusted;
+
+        GLfloat *vertex_data;
+	glm::vec4 vertices[2];
+	
+        glm::mat4 matrix;
+
+	glm::mat4 translationMatrix(
+	    1.0f,0.0f,0.0f,-(0.5 * BB_GRAPHICS_WIDTH),
+	    0.0f,1.0f,0.0f,-(0.5 * BB_GRAPHICS_HEIGHT),
+	    0.0f,0.0f,1.0f,0.0f,
+	    0.0f,0.0f,0.0f,1.0f);
+
+	glm::mat4 scaleMatrix(
+		 2.0f / BB_GRAPHICS_WIDTH,0.0f,0.0f,0.0f,
+		 0.0f,2.0f / BB_GRAPHICS_HEIGHT,0.0f,0.0f,
+		 0.0f,0.0f,1.0f,0.0f,
+		 0.0f,0.0f,0.0f,1.0f);
+
+	matrix = translationMatrix * scaleMatrix;
+
+	cached_line = new CachedLine;
+	cached_graphics = (CachedGraphics*)malloc(sizeof(CachedGraphics));
+	cached_graphics->data = (void*)cached_line;
+	cached_graphics->id = GRAPHICS_TYPE_LINE;
+	cached_graphics->data = cached_line;
+	
+        cached_line->vertices[0] = glm::vec4(x1_adjusted,y1_adjusted,0.0f,1.0f) * matrix;
+	cached_line->vertices[1] = glm::vec4(x1_adjusted + x2_adjusted,y1_adjusted + y2_adjusted,0.0f,1.0f) * matrix;
+	cached_line->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
+
+	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
+
+    }
+
+    GList *batch_line(GList* list)
+    {
+	unsigned long long int num_items = 0;
+	GLfloat *vertex_data;
+	CachedGraphics *cached_graphics;
+	CachedLine *cached_line = (CachedLine*)list->data;
+	int i,j;
+	GList *start = list;
+	GList *finish;
+	GLint position_handle;
+	GLuint color_handle;
+	GLfloat *vertices;
+	GLuint *indices;
+	GLuint error;
+	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLuint color_buffer;
+       	
+	while(list && ((CachedGraphics*)list->data)->id == GRAPHICS_TYPE_LINE)
+	{
+	    num_items++;
+	    list = g_list_next(list);
+	}
+        finish = list;
+	
+	int size = 2 * 4 * sizeof(GLfloat);
+	indices = (GLuint*)malloc(2 * num_items * sizeof(GLuint));
+
+	for(i = 0; i < (2 * num_items); i++)
+	{
+	    indices[i] = i;
+	}
+	
+        vertex_data = (GLfloat*)malloc(2 * size * num_items);
+	list = start;
+
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_line = (CachedLine*)cached_graphics->data;
+	    for(j = 0; j < 2; j++)
+	    {
+		memcpy(vertex_data + (i * 2 + j) * sizeof(GLfloat),glm::value_ptr(cached_line->vertices[j]),4 * sizeof(GLfloat));
+	    }
+
+	    list = g_list_next(list);   
+	}
+
+	list = start;
+        GLfloat *colors = vertex_data + ((size * num_items) / 4);
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_line = (CachedLine*)cached_graphics->data;
+	    for(j = 0; j < 2; j++)
+	    {
+		memcpy(colors + (i * 2 + j) * sizeof(GLfloat),glm::value_ptr(cached_line->color),4 * sizeof(GLfloat));
+	    }
+	    list = g_list_next(list);   
+	}
+	
+
+	
+	glGenBuffers(1,&vertex_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
+	glBufferData(GL_ARRAY_BUFFER,size * 2 * num_items,vertex_data,GL_STATIC_DRAW);
+
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	glGenBuffers(1,&index_buffer);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,2 * sizeof(GLuint) * num_items,indices,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&color_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glBufferData(GL_ARRAY_BUFFER,size * 2*  num_items,colors,GL_STATIC_DRAW);
+	
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	glUseProgram(PRIMITIVE_PROGRAM);
+
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
+	color_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "color");
+	
+	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
+	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,4 * sizeof(GLfloat),(void*)0);
+        glEnableVertexAttribArray(position_handle);
+
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glVertexAttribPointer(color_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(color_handle);
+
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
+
+	glDrawElements(GL_LINES,2 * num_items,GL_UNSIGNED_INT,(void*)0);
+
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.2 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	glDisableVertexAttribArray(position_handle);
+	glDisableVertexAttribArray(color_handle);
+	glDeleteBuffers(1,&vertex_buffer);
+	glDeleteBuffers(1,&color_buffer);
+	glDeleteBuffers(1,&index_buffer);
+	return finish;
+    }
+    
     
     unsigned long long int bb_oval_filled(long long int x,long long int y,long long int width,long long int height)
     {
@@ -607,7 +865,8 @@ char *dummy_error(GLuint error)
 	GLint position_handle;
 	GLuint color_handle;
 	GLfloat *vertices;
-	GLushort *indices;
+	CachedGraphics *cached_graphics;
+	CachedOval *cached_oval;
 	int i;
 	
 	glm::vec3 axis(0.0f,0.0f,-1.0f);
@@ -631,7 +890,9 @@ char *dummy_error(GLuint error)
 
 	float major_axis = width > height ? width : height;
 	float minor_axis = width > height ? height : width;
-	long long int perimeter = 2.0f * BB_PI * sqrt((major_axis * major_axis + minor_axis * minor_axis) / 2.0);
+	long long unsigned int perimeter = 0.09 * 2.0f * BB_PI * sqrt((major_axis * major_axis + minor_axis * minor_axis) / 2.0);
+	if(perimeter < 3) perimeter = 3;
+	if(perimeter > 26) perimeter = 26;
 	float interval = (2.0f * BB_PI) / perimeter;
 	
 	glm::mat4 scale_matrix1(
@@ -646,56 +907,130 @@ char *dummy_error(GLuint error)
 	     0.0f,0.0f,1.0f,0.0f,
 	     0.0f,0.0f,0.0f,1.0f);
 	
-	vertices = (GLfloat*)malloc(4 * (perimeter) * sizeof(GLfloat));
-	indices = (GLushort*)malloc((perimeter) * sizeof(GLushort));
-
         matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
-	
-	vertices[0] = 0.0;
-	vertices[1] = 0.0;
-	vertices[2] = 0.0;
-	vertices[3] = 1.0;
-	indices[0] = 0;
-	
+
+	cached_oval = new CachedOval;
+        cached_oval->vertices = new glm::vec4[perimeter * 3 + 3];
+
+	cached_graphics = (CachedGraphics*)malloc(sizeof(CachedGraphics));
+	cached_graphics->data = (void*)cached_oval;
+	cached_graphics->id = GRAPHICS_TYPE_OVAL;
+	int j;
+
 	for(i = 0; i < perimeter; i++)
 	{
-	    vertices[i * 4] = cos(interval * i);
-	    vertices[i * 4 + 1] = sin(interval * i);
-	    vertices[i * 4 + 2] = 0.0f;
-	    vertices[i * 4 + 3] = 1.0f;
-	    indices[i] = i;
+	    j = i * 3;
+	    cached_oval->vertices[j] = glm::vec4(cos(interval * i),sin(interval * i),0.0f,1.0f) * matrix;
+	    cached_oval->vertices[j + 1] = glm::vec4(cos(interval * (i + 1)),sin(interval * (i + 1)),0.0f,1.0f) * matrix;
+	    cached_oval->vertices[j + 2] = glm::vec4(0.0f,0.0f,0.0f,1.0f) * matrix;
 	}
 
-	glGenBuffers(1,&vertex_buffer);
+	cached_oval->num_vertices = perimeter * 3 + 3;
+	CachedOval::TOTAL_NUM_VERTICES += perimeter * 3 + 3;
+        cached_oval->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
+	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
+    }
+
+    GList *batch_oval_filled(GList *list)
+    {
+	unsigned long long int num_items = 0;
+	GLfloat *vertex_data;
+	GLfloat *color_data;
+	GLfloat *p;
+	CachedGraphics *cached_graphics;
+	CachedOval *cached_oval = (CachedOval*)list->data;
+	int i,j;
+	GList *start = list;
+	GList *finish;
+	GLint position_handle;
+	GLuint color_handle;
+	GLfloat *vertices;
+	GLuint *indices;
+	GLuint error;
+	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLuint color_buffer;
+       	
+	while(list && ((CachedGraphics*)list->data)->id == GRAPHICS_TYPE_OVAL)
+	{
+	    num_items++;
+	    list = g_list_next(list);
+	}
+	finish = list;
+
+	indices = (GLuint*)malloc(CachedOval::TOTAL_NUM_VERTICES * sizeof(GLuint));
+        
+	for(i = 0; i < CachedOval::TOTAL_NUM_VERTICES; i++)
+	{
+	    indices[i] = i;
+	}
+	
+        vertex_data = (GLfloat*)malloc(CachedOval::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat));
+	list = start;
+	p = vertex_data;
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_oval = (CachedOval*)cached_graphics->data;
+	    for(j = 0; j < cached_oval->num_vertices; j++)
+	    {
+		memcpy(p + j * 4,glm::value_ptr(cached_oval->vertices[j]),4 * sizeof(GLfloat));
+	    }
+
+	    p += cached_oval->num_vertices * 4;
+	    list = g_list_next(list);   
+	}
+       
+	list = start;
+        color_data = (GLfloat*)malloc(CachedOval::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat));
+        p = color_data;
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_oval = (CachedOval*)cached_graphics->data;
+	    for(j = 0; j < cached_oval->num_vertices; j++)
+	    {
+		memcpy(p + j * 4,glm::value_ptr(cached_oval->color),4 * sizeof(GLfloat));
+	    }
+	    p += cached_oval->num_vertices * 4;
+	    list = g_list_next(list);   
+	}
+
+        glGenBuffers(1,&vertex_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,4 * (perimeter) * sizeof(GLfloat),vertices,GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,CachedOval::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat),vertex_data,GL_STATIC_DRAW);
 
 	glGenBuffers(1,&index_buffer);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,(perimeter) * sizeof(GLushort),indices,GL_STATIC_DRAW);
-	
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,CachedOval::TOTAL_NUM_VERTICES * sizeof(GLuint),indices,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&color_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glBufferData(GL_ARRAY_BUFFER,CachedOval::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat),color_data,GL_STATIC_DRAW);
+        
 	glUseProgram(PRIMITIVE_PROGRAM);
 
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.3 %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.6 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
-	matrix_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "uMVPMatrix");
 	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
+	color_handle =  glGetAttribLocation(PRIMITIVE_PROGRAM, "color");
 	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-
-	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
-	glUniform4fv(color_handle, 1, color);
-	
+	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
 	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
-	glEnableVertexAttribArray(position_handle);	
+	glEnableVertexAttribArray(position_handle);
+
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glVertexAttribPointer(color_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(color_handle);
 	
-	glDrawElements(GL_TRIANGLE_FAN,perimeter,GL_UNSIGNED_SHORT,(void*)0);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
+	
+	glDrawElements(GL_TRIANGLES,CachedOval::TOTAL_NUM_VERTICES,GL_UNSIGNED_INT,(void*)0);
 	
 	error = glGetError();
 	if( error != GL_NO_ERROR )
@@ -703,12 +1038,19 @@ char *dummy_error(GLuint error)
 	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
-	free(vertices);
+	free(vertex_data);
+	free(color_data);
 	free(indices);
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
+
 	glDisableVertexAttribArray(position_handle);
+	glDisableVertexAttribArray(color_handle);
+	glDeleteBuffers(1,&vertex_buffer);
+	glDeleteBuffers(1,&color_buffer);
+	glDeleteBuffers(1,&index_buffer);
+
+	return finish;
     }
+
 
     unsigned long long int bb_oval_hollow(long long int x,long long int y,long long int width,long long int height)
     {
@@ -719,7 +1061,8 @@ char *dummy_error(GLuint error)
 	GLint position_handle;
 	GLuint color_handle;
 	GLfloat *vertices;
-	GLushort *indices;
+	CachedGraphics *cached_graphics;
+	CachedOvalHollow *cached_oval;
 	int i;
 	
 	glm::vec3 axis(0.0f,0.0f,-1.0f);
@@ -740,12 +1083,14 @@ char *dummy_error(GLuint error)
 	    0.0f,1.0f,0.0f,1.0f - offset_by_y - offset_by_handle_y - offset_by_origin_y,
 	    0.0f,0.0f,1.0f,0.0f,
 	    0.0f,0.0f,0.0f,1.0f);
-	
+
 	float major_axis = width > height ? width : height;
 	float minor_axis = width > height ? height : width;
-	long long int perimeter = 2.0f * BB_PI * sqrt((major_axis * major_axis + minor_axis * minor_axis) / 2.0);
+	long long int perimeter = 0.09 * 2.0f * BB_PI * sqrt((major_axis * major_axis + minor_axis * minor_axis) / 2.0);
+	if(perimeter < 3) perimeter = 3;
+	if(perimeter > 26) perimeter = 26;
 	float interval = (2.0f * BB_PI) / perimeter;
-
+	
 	glm::mat4 scale_matrix1(
 	    0.5 * float(width) * BB_SCALE_X,0.0f,0.0f,0.0f,
 	    0.0f,0.5 * float(height) * BB_SCALE_Y,0.0f,0.0f,
@@ -758,54 +1103,133 @@ char *dummy_error(GLuint error)
 	     0.0f,0.0f,1.0f,0.0f,
 	     0.0f,0.0f,0.0f,1.0f);
 	
-	vertices = (GLfloat*)malloc(4 * perimeter *  sizeof(GLfloat));
-	indices = (GLushort*)malloc(perimeter * sizeof(GLushort));
-
         matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
+
+	cached_oval = new CachedOvalHollow;
+        cached_oval->vertices = new glm::vec4[perimeter * 2 + 2];
+
+	cached_graphics = (CachedGraphics*)malloc(sizeof(CachedGraphics));
+	cached_graphics->data = (void*)cached_oval;
+	cached_graphics->id = GRAPHICS_TYPE_OVAL_HOLLOW;
+	int j;
 
 	for(i = 0; i < perimeter; i++)
 	{
-	    vertices[i * 4] = cos(interval * i);
-	    vertices[i * 4 + 1] = sin(interval * i);
-	    vertices[i * 4 + 2] = 0.0f;
-	    vertices[i * 4 + 3] = 1.0f;
+	    j = i * 2;
+	    cached_oval->vertices[j] = glm::vec4(cos(interval * i),sin(interval * i),0.0f,1.0f) * matrix;
+	    cached_oval->vertices[j + 1] = glm::vec4(cos(interval * (i + 1)),sin(interval * (i + 1)),0.0f,1.0f) * matrix;
+	}
+
+	cached_oval->num_vertices = perimeter * 2 + 2;
+	CachedOvalHollow::TOTAL_NUM_VERTICES += perimeter * 2 + 2;
+
+        cached_oval->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
+	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
+
+    }
+
+    GList *batch_oval_hollow(GList *list)
+    {
+	unsigned long long int num_items = 0;
+	GLfloat *vertex_data;
+	GLfloat *color_data;
+	GLfloat *p;
+	CachedGraphics *cached_graphics;
+	CachedOvalHollow *cached_oval = (CachedOvalHollow*)list->data;
+	int i,j;
+	GList *start = list;
+	GList *finish;
+	GLint position_handle;
+	GLuint color_handle;
+	GLfloat *vertices;
+	GLuint *indices;
+	GLuint error;
+	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLuint color_buffer;
+       	
+	while(list && ((CachedGraphics*)list->data)->id == GRAPHICS_TYPE_OVAL_HOLLOW)
+	{
+	    num_items++;
+	    list = g_list_next(list);
+	}
+	finish = list;
+
+	indices = (GLuint*)malloc(CachedOvalHollow::TOTAL_NUM_VERTICES * sizeof(GLuint));
+        
+	for(i = 0; i < CachedOvalHollow::TOTAL_NUM_VERTICES; i++)
+	{
 	    indices[i] = i;
 	}
 	
-	glGenBuffers(1,&vertex_buffer);
+        vertex_data = (GLfloat*)malloc(CachedOvalHollow::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat));
+	list = start;
+	p = vertex_data;
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_oval = (CachedOvalHollow*)cached_graphics->data;
+	    for(j = 0; j < cached_oval->num_vertices; j++)
+	    {
+		memcpy(p + j * 4,glm::value_ptr(cached_oval->vertices[j]),4 * sizeof(GLfloat));
+	    }
+
+	    p += cached_oval->num_vertices * 4;
+	    list = g_list_next(list);   
+	}
+       
+	list = start;
+        color_data = (GLfloat*)malloc(CachedOvalHollow::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat));
+        p = color_data;
+	
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_oval = (CachedOvalHollow*)cached_graphics->data;
+	    for(j = 0; j < cached_oval->num_vertices; j++)
+	    {
+		memcpy(p + j * 4,glm::value_ptr(cached_oval->color),4 * sizeof(GLfloat));
+	    }
+
+	    p += cached_oval->num_vertices * 4;
+	    list = g_list_next(list);   
+	}
+
+        glGenBuffers(1,&vertex_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,4 * perimeter * sizeof(GLfloat),vertices,GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,CachedOvalHollow::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat),vertex_data,GL_STATIC_DRAW);
 
 	glGenBuffers(1,&index_buffer);
-
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,perimeter * sizeof(GLushort),indices,GL_STATIC_DRAW);
-	
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,CachedOvalHollow::TOTAL_NUM_VERTICES * sizeof(GLuint),indices,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&color_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glBufferData(GL_ARRAY_BUFFER,CachedOvalHollow::TOTAL_NUM_VERTICES * 4 * sizeof(GLfloat),color_data,GL_STATIC_DRAW);
+        
 	glUseProgram(PRIMITIVE_PROGRAM);
 
 	error = glGetError();
 	if( error != GL_NO_ERROR )
 	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.4 %s\n",dummy_error(error));
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.6 %s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
-	matrix_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "uMVPMatrix");
 	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
-	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-
-	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
-	glUniform4fv(color_handle, 1, color);
+	color_handle =  glGetAttribLocation(PRIMITIVE_PROGRAM, "color");
 	
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
 	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
 	glEnableVertexAttribArray(position_handle);
 
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glVertexAttribPointer(color_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(color_handle);
+	
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
 	
-	glDrawElements(GL_LINE_LOOP,perimeter,GL_UNSIGNED_SHORT,(void*)0);
+	glDrawElements(GL_LINES,CachedOvalHollow::TOTAL_NUM_VERTICES,GL_UNSIGNED_INT,(void*)0);
 	
 	error = glGetError();
 	if( error != GL_NO_ERROR )
@@ -813,12 +1237,20 @@ char *dummy_error(GLuint error)
 	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
-	free(vertices);
+	free(vertex_data);
+	free(color_data);
 	free(indices);
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
+
 	glDisableVertexAttribArray(position_handle);
+	glDisableVertexAttribArray(color_handle);
+	glDeleteBuffers(1,&vertex_buffer);
+	glDeleteBuffers(1,&color_buffer);
+	glDeleteBuffers(1,&index_buffer);
+
+	return finish;
     }
+    
+
 
     unsigned long long int bb_rect(long long int x,long long int y,long long int width,long long int height,unsigned long long int filled)
     {
@@ -826,138 +1258,12 @@ char *dummy_error(GLuint error)
 	    bb_rect_hollow(x,y,width,height);
 	else
 	    bb_rect_filled(x,y,width,height);
-    }
-    
-    unsigned long long int bb_rect_hollow(long long int x,long long int y,long long int width,long long int height)
-    {
-	GLuint error;
-	GLuint vertex_buffer;
-	GLuint index_buffer;
-	GLint matrix_handle;
-	GLint position_handle;
-	GLuint color_handle;
-	GLfloat *vertices;
-	GLushort *indices;
-	int i;
-	
-	glm::vec3 axis(0.0f,0.0f,-1.0f);
-	glm::mat4 rotation_matrix = glm::rotate(((float)BB_ORIENTATION) / 360.0f * 2.0f * ((float)BB_PI),axis);
-        glm::mat4 matrix;
-	
-	float offset_by_x = (((float)x) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_y = (((float)y) / BB_GRAPHICS_HEIGHT) * 2.0f;
+    }    
 
-	float offset_by_handle_x = ((0.5f * (width * BB_SCALE_X) - BB_PRIMITIVE_HANDLE_X) / (BB_GRAPHICS_WIDTH)) * 2.0f;
-	float offset_by_handle_y = ((0.5f * (height * BB_SCALE_Y) - BB_PRIMITIVE_HANDLE_Y) / (BB_GRAPHICS_HEIGHT)) * 2.0f;
-	
-	float offset_by_origin_x = (((float)BB_ORIGIN_X) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_origin_y = (((float)BB_ORIGIN_Y) / BB_GRAPHICS_HEIGHT) * 2.0f;
-	
-	glm::mat4 translation_matrix(
-	    1.0f,0.0f,0.0f,-1.0f + offset_by_x + offset_by_handle_x + offset_by_origin_x,
-	    0.0f,1.0f,0.0f,1.0f - offset_by_y - offset_by_handle_y - offset_by_origin_y,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-	
-	glm::mat4 scale_matrix1(
-	    0.5 * float(width) * BB_SCALE_X,0.0f,0.0f,0.0f,
-	    0.0f,0.5 * float(height) * BB_SCALE_Y,0.0f,0.0f,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-
-	glm::mat4 scale_matrix2(
-	    (2.0f / BB_GRAPHICS_WIDTH),0.0f,0.0f,0.0f,
-	     0.0f,(2.0f / BB_GRAPHICS_HEIGHT),0.0f,0.0f,
-	     0.0f,0.0f,1.0f,0.0f,
-	     0.0f,0.0f,0.0f,1.0f);
-	
-	vertices = (GLfloat*)malloc(4 * 4 * sizeof(GLfloat));
-	indices = (GLushort*)malloc(4 * sizeof(GLushort));
-
-        matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
-    
-    vertices[0 * 4 + 0] = -1.0f;
-    vertices[0 * 4 + 1] = -1.0f;
-    vertices[0 * 4 + 2] = 0.0f;
-    vertices[0 * 4 + 3] = 1.0f;
-    indices[0] = 0;
-    
-    vertices[1 * 4 + 0] = -1.0f;
-    vertices[1 * 4 + 1] = 1.0f;
-    vertices[1 * 4 + 2] = 0.0f;
-    vertices[1 * 4 + 3] = 1.0f;    
-    indices[1] = 1;
-
-    vertices[2 * 4 + 0] = 1.0f;
-    vertices[2 * 4 + 1] = 1.0f;
-    vertices[2 * 4 + 2] = 0.0f;
-    vertices[2 * 4 + 3] = 1.0f; 
-    indices[2] = 2;
-
-    vertices[3 * 4 + 0] = 1.0f;
-    vertices[3 * 4 + 1] = -1.0f;
-    vertices[3 * 4 + 2] = 0.0f;
-    vertices[3 * 4 + 3] = 1.0f;
-    indices[3] = 3;
-	
-	glGenBuffers(1,&vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,4 * 4 * sizeof(GLfloat),vertices,GL_STATIC_DRAW);
-
-	glGenBuffers(1,&index_buffer);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,4 * sizeof(GLushort),indices,GL_STATIC_DRAW);
-	
-	glUseProgram(PRIMITIVE_PROGRAM);
-
-	error = glGetError();
-	if( error != GL_NO_ERROR )
-	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.5 %s\n",dummy_error(error));
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
-	}
-	
-	matrix_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "uMVPMatrix");
-	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
-	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-
-	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
-	glUniform4fv(color_handle, 1, color);
-	
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
-	glEnableVertexAttribArray(position_handle);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
-	
-	glDrawElements(GL_LINE_LOOP,4,GL_UNSIGNED_SHORT,(void*)0);
-	
-	error = glGetError();
-	if( error != GL_NO_ERROR )
-	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
-	}
-	free(vertices);
-	free(indices);
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
-	glDisableVertexAttribArray(position_handle);
-    }
-    
     unsigned long long int bb_rect_filled(long long int x,long long int y,long long int width,long long int height)
     {
-	GLuint error;
-	GLuint vertex_buffer;
-	GLuint index_buffer;
-	GLint matrix_handle;
-	GLint position_handle;
-	GLuint color_handle;
-	GLfloat *vertices;
-	GLushort *indices;
+	CachedGraphics *cached_graphics;
+	CachedRect *cached_rect;
 	int i;
 	
 	glm::vec3 axis(0.0f,0.0f,-1.0f);
@@ -991,43 +1297,100 @@ char *dummy_error(GLuint error)
 	     0.0f,0.0f,1.0f,0.0f,
 	     0.0f,0.0f,0.0f,1.0f);
 	
-	vertices = (GLfloat*)malloc(4 * 4 * sizeof(GLfloat));
-	indices = (GLushort*)malloc(4 * sizeof(GLushort));
-
         matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
-    
-    vertices[0 * 4 + 0] = -1.0f;
-    vertices[0 * 4 + 1] = -1.0f;
-    vertices[0 * 4 + 2] = 0.0f;
-    vertices[0 * 4 + 3] = 1.0f;
-    indices[0] = 0;
-    
-    vertices[1 * 4 + 0] = -1.0f;
-    vertices[1 * 4 + 1] = 1.0f;
-    vertices[1 * 4 + 2] = 0.0f;
-    vertices[1 * 4 + 3] = 1.0f;    
-    indices[1] = 1;
-
-    vertices[2 * 4 + 0] = 1.0f;
-    vertices[2 * 4 + 1] = -1.0f;
-    vertices[2 * 4 + 2] = 0.0f;
-    vertices[2 * 4 + 3] = 1.0f; 
-    indices[2] = 2;
-
-    vertices[3 * 4 + 0] = 1.0f;
-    vertices[3 * 4 + 1] = 1.0f;
-    vertices[3 * 4 + 2] = 0.0f;
-    vertices[3 * 4 + 3] = 1.0f;
-    indices[3] = 3;
 	
-	glGenBuffers(1,&vertex_buffer);
+	cached_rect = new CachedRect;
+	cached_graphics = (CachedGraphics*)malloc(sizeof(CachedGraphics));
+	cached_graphics->data = (void*)cached_rect;
+	cached_graphics->id = GRAPHICS_TYPE_RECT;
+	cached_graphics->data = cached_rect;
+	
+        cached_rect->vertices[0] = glm::vec4(-1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[1] = glm::vec4(-1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[2] = glm::vec4(1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[3] = glm::vec4(-1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[4] = glm::vec4(1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[5] = glm::vec4(1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
+        
+	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
+	
+    }
+
+    GList *batch_rect_filled(GList *list)
+    {
+	unsigned long long int num_items = 0;
+	GLfloat *vertex_data;
+	GLfloat *color_data;
+	CachedGraphics *cached_graphics;
+	CachedRect *cached_rect = (CachedRect*)list->data;
+	int i,j;
+	GList *start = list;
+	GList *finish;
+	GLint position_handle;
+	GLuint color_handle;
+	GLfloat *vertices;
+	GLuint *indices;
+	GLuint error;
+	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLuint color_buffer;
+       	
+	while(list && ((CachedGraphics*)list->data)->id == GRAPHICS_TYPE_RECT)
+	{
+	    num_items++;
+	    list = g_list_next(list);
+	}
+        finish = list;
+	
+	int size = 6 * 4 * sizeof(GLfloat);
+	indices = (GLuint*)malloc(6 * num_items * sizeof(GLuint));
+
+	for(i = 0; i < (6 * num_items); i++)
+	{
+	    indices[i] = i;
+	}
+	
+        vertex_data = (GLfloat*)malloc(2 * size * num_items);
+
+	list = start;
+
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_rect = (CachedRect*)cached_graphics->data;
+	    for(j = 0; j < 6; j++)
+	    {
+		memcpy(vertex_data + (i * 6 + j) * sizeof(GLfloat),glm::value_ptr(cached_rect->vertices[j]),4 * sizeof(GLfloat));
+	    }
+
+	    list = g_list_next(list);   
+	}
+
+	list = start;
+        color_data = vertex_data + ((size * num_items) / 4);
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_rect = (CachedRect*)cached_graphics->data;
+	    for(j = 0; j < 6; j++)
+	    {
+		memcpy(color_data + (i * 6 + j) * sizeof(GLfloat),glm::value_ptr(cached_rect->color),4 * sizeof(GLfloat));
+	    }
+	    list = g_list_next(list);   
+	}
+	
+        glGenBuffers(1,&vertex_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,4 * 4 * sizeof(GLfloat),vertices,GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER,size * num_items,vertex_data,GL_STATIC_DRAW);
 
 	glGenBuffers(1,&index_buffer);
-
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,4 * sizeof(GLushort),indices,GL_STATIC_DRAW);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,6 * num_items * sizeof(GLuint),indices,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&color_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glBufferData(GL_ARRAY_BUFFER,size * num_items,color_data,GL_STATIC_DRAW);
 	
 	glUseProgram(PRIMITIVE_PROGRAM);
 
@@ -1038,22 +1401,20 @@ char *dummy_error(GLuint error)
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
 	
-	matrix_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "uMVPMatrix");
 	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
-	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-
-	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
-	glUniform4fv(color_handle, 1, color);
+	color_handle =  glGetAttribLocation(PRIMITIVE_PROGRAM, "color");
 	
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
 	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
 	glEnableVertexAttribArray(position_handle);
 
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glVertexAttribPointer(color_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(color_handle);
+	
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
 	
-	glDrawElements(GL_TRIANGLE_STRIP,4,GL_UNSIGNED_SHORT,(void*)0);
+	glDrawElements(GL_TRIANGLES,6 * num_items,GL_UNSIGNED_INT,(void*)0);
 	
 	error = glGetError();
 	if( error != GL_NO_ERROR )
@@ -1061,16 +1422,201 @@ char *dummy_error(GLuint error)
 	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
 	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
 	}
-	free(vertices);
+	free(vertex_data);
 	free(indices);
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
+
 	glDisableVertexAttribArray(position_handle);
+	glDisableVertexAttribArray(color_handle);
+	glDeleteBuffers(1,&vertex_buffer);
+	glDeleteBuffers(1,&color_buffer);
+	glDeleteBuffers(1,&index_buffer);
+
+	return finish;
     }
     
-    
-    
 
+
+
+    unsigned long long int bb_rect_hollow(long long int x,long long int y,long long int width,long long int height)
+    {
+	CachedGraphics *cached_graphics;
+	CachedRectHollow *cached_rect;
+	int i;
+
+	glm::vec3 axis(0.0f,0.0f,-1.0f);
+	glm::mat4 rotation_matrix = glm::rotate(((float)BB_ORIENTATION) / 360.0f * 2.0f * ((float)BB_PI),axis);
+        glm::mat4 matrix;
+	
+	float offset_by_x = (((float)x) / BB_GRAPHICS_WIDTH) * 2.0f;
+	float offset_by_y = (((float)y) / BB_GRAPHICS_HEIGHT) * 2.0f;
+
+	float offset_by_handle_x = ((0.5f * (width * BB_SCALE_X) - BB_PRIMITIVE_HANDLE_X) / (BB_GRAPHICS_WIDTH)) * 2.0f;
+	float offset_by_handle_y = ((0.5f * (height * BB_SCALE_Y) - BB_PRIMITIVE_HANDLE_Y) / (BB_GRAPHICS_HEIGHT)) * 2.0f;
+	
+	float offset_by_origin_x = (((float)BB_ORIGIN_X) / BB_GRAPHICS_WIDTH) * 2.0f;
+	float offset_by_origin_y = (((float)BB_ORIGIN_Y) / BB_GRAPHICS_HEIGHT) * 2.0f;
+	
+	glm::mat4 translation_matrix(
+	    1.0f,0.0f,0.0f,-1.0f + offset_by_x + offset_by_handle_x + offset_by_origin_x,
+	    0.0f,1.0f,0.0f,1.0f - offset_by_y - offset_by_handle_y - offset_by_origin_y,
+	    0.0f,0.0f,1.0f,0.0f,
+	    0.0f,0.0f,0.0f,1.0f);
+	
+	glm::mat4 scale_matrix1(
+	    0.5 * float(width) * BB_SCALE_X,0.0f,0.0f,0.0f,
+	    0.0f,0.5 * float(height) * BB_SCALE_Y,0.0f,0.0f,
+	    0.0f,0.0f,1.0f,0.0f,
+	    0.0f,0.0f,0.0f,1.0f);
+
+	glm::mat4 scale_matrix2(
+	    (2.0f / BB_GRAPHICS_WIDTH),0.0f,0.0f,0.0f,
+	     0.0f,(2.0f / BB_GRAPHICS_HEIGHT),0.0f,0.0f,
+	     0.0f,0.0f,1.0f,0.0f,
+	     0.0f,0.0f,0.0f,1.0f);
+	
+        matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
+
+	cached_rect = new CachedRectHollow;
+	cached_graphics = (CachedGraphics*)malloc(sizeof(CachedGraphics));
+	cached_graphics->data = (void*)cached_rect;
+	cached_graphics->id = GRAPHICS_TYPE_RECT_HOLLOW;
+	cached_graphics->data = cached_rect;
+
+        cached_rect->vertices[0] = glm::vec4(-1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[1] = glm::vec4(-1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[2] = glm::vec4(-1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[3] = glm::vec4(1.0,1.0,0.0,1.0) * matrix;
+
+        cached_rect->vertices[4] = glm::vec4(1.0,1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[5] = glm::vec4(1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[6] = glm::vec4(1.0,-1.0,0.0,1.0) * matrix;
+        cached_rect->vertices[7] = glm::vec4(-1.0,-1.0,0.0,1.0) * matrix;
+
+        cached_rect->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
+	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
+	
+    }
+
+    GList *batch_rect_hollow(GList *list)
+    {
+	unsigned long long int num_items = 0;
+	GLfloat *vertex_data;
+	GLfloat *color_data;
+	CachedGraphics *cached_graphics;
+	CachedRectHollow *cached_rect = (CachedRectHollow*)list->data;
+	int i,j;
+	GList *start = list;
+	GList *finish;
+	GLint position_handle;
+	GLuint color_handle;
+	GLfloat *vertices;
+	GLuint *indices;
+	GLuint error;
+	GLuint vertex_buffer;
+	GLuint index_buffer;
+	GLuint color_buffer;
+       	
+	while(list && ((CachedGraphics*)list->data)->id == GRAPHICS_TYPE_RECT_HOLLOW)
+	{
+	    num_items++;
+	    list = g_list_next(list);
+	}
+        finish = list;
+	
+	int size = 8 * 4 * sizeof(GLfloat);
+	indices = (GLuint*)malloc(8 * num_items * sizeof(GLuint));
+
+	for(i = 0; i < (8 * num_items); i++)
+	{
+	    indices[i] = i;
+	}
+	
+        vertex_data = (GLfloat*)malloc(2 * size * num_items);
+
+	list = start;
+
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_rect = (CachedRectHollow*)cached_graphics->data;
+ 
+	    for(j = 0; j < 8; j++)
+	    {
+		memcpy(vertex_data + (i * 8 + j) * sizeof(GLfloat),glm::value_ptr(cached_rect->vertices[j]),4 * sizeof(GLfloat));
+	    }
+
+	    list = g_list_next(list);   
+	}
+
+	list = start;
+
+	list = start;
+        color_data = vertex_data + ((size * num_items) / 4);
+
+	for(i = 0; i < num_items; i++)
+	{
+	    cached_graphics = (CachedGraphics*)list->data;
+	    cached_rect = (CachedRectHollow*)cached_graphics->data;
+	    for(j = 0; j < 8; j++)
+	    {
+		memcpy(color_data + (i * 8 + j) * sizeof(GLfloat),glm::value_ptr(cached_rect->color),4 * sizeof(GLfloat));
+	    }
+	    list = g_list_next(list);   
+	}
+	
+        glGenBuffers(1,&vertex_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
+	glBufferData(GL_ARRAY_BUFFER,size * num_items,vertex_data,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&index_buffer);
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
+	glBufferData(GL_ELEMENT_ARRAY_BUFFER,8 * num_items * sizeof(GLuint),indices,GL_STATIC_DRAW);
+
+	glGenBuffers(1,&color_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glBufferData(GL_ARRAY_BUFFER,size * num_items,color_data,GL_STATIC_DRAW);
+	
+	glUseProgram(PRIMITIVE_PROGRAM);
+
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.6 %s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	
+	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
+	color_handle =  glGetAttribLocation(PRIMITIVE_PROGRAM, "color");
+	
+	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
+	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(position_handle);
+
+	glBindBuffer(GL_ARRAY_BUFFER,color_buffer);
+	glVertexAttribPointer(color_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
+	glEnableVertexAttribArray(color_handle);
+	
+	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
+	
+	glDrawElements(GL_LINES,8 * num_items,GL_UNSIGNED_INT,(void*)0);
+	
+	error = glGetError();
+	if( error != GL_NO_ERROR )
+	{
+	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
+	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	}
+	free(vertex_data);
+	free(indices);
+
+	glDisableVertexAttribArray(position_handle);
+	glDisableVertexAttribArray(color_handle);
+	glDeleteBuffers(1,&vertex_buffer);
+	glDeleteBuffers(1,&color_buffer);
+	glDeleteBuffers(1,&index_buffer);
+
+	return finish;
+    }
     
     void load_primitive_program()
     {
@@ -1083,17 +1629,19 @@ char *dummy_error(GLuint error)
 	
 	const GLchar *vertex_shader_code [] =
 	     {"#version 130\n",
-	      "attribute vec4 vPosition;",
-	      "uniform mat4 uMVPMatrix;",
+	      "in vec4 vPosition;",
+	      "in vec4 color;",
+	      "out vec4 fragment_color;",
 	      "void main() {",
-	      "  gl_Position = vPosition * uMVPMatrix;",
+	      "  gl_Position = vPosition;",
+	      "  fragment_color = color;",
 	      "}",NULL};
 
 	const GLchar *fragment_shader_code [] =
 	     {"#version 130\n",
-	      "uniform vec4 vColor;",
+	      "in vec4 fragment_color;",
 	      "void main() {",
-	      "  gl_FragColor = vColor;",
+	      "  gl_FragColor = fragment_color;",
 	      "}",NULL};
 
         vertex_shader_size = 0;
@@ -1228,88 +1776,113 @@ char *dummy_error(GLuint error)
 
 	return shader;
 }
-    
-    unsigned long long int bb_flip(unsigned long long int sync)
+
+    void free_cached_rect(void *it)
     {
-	SDL_GL_SwapWindow(WINDOW);
-    }    
-
-    unsigned long long int bb_line(long long int x1,long long int y1,long long int x2,long long int y2)
-    {
-      	GLuint vertex_buffer;
-	GLuint index_buffer;
-	GLenum error;
-	GLuint position_handle;
-	GLuint color_handle;
-	GLuint vertex_stride;
-	GLfloat x1_adjusted,y1_adjusted,x2_adjusted,y2_adjusted;
-	GLuint indices [] = {0,1};
-	GLuint matrix_handle;
-
-    x1_adjusted = (x1 + BB_ORIGIN_X);
-	y1_adjusted = (BB_GRAPHICS_HEIGHT - y1 - BB_ORIGIN_Y);
-	x2_adjusted = (x2 + BB_ORIGIN_X) - x1_adjusted;
-	y2_adjusted = (BB_GRAPHICS_HEIGHT - y2 - BB_ORIGIN_Y) - y1_adjusted;
-    
-	GLfloat vertices [] = {x1_adjusted,y1_adjusted,0.0f,x1_adjusted + x2_adjusted,y1_adjusted + y2_adjusted,0.0f};
-
-	glm::vec3 axis(0.0f,0.0f,-1.0f);
-	glm::mat4 rotationMatrix = glm::rotate(0.0f,axis);
-        glm::mat4 matrix;
-
-	glm::mat4 translationMatrix(
-	    1.0f,0.0f,0.0f,-(0.5 * BB_GRAPHICS_WIDTH),
-	    0.0f,1.0f,0.0f,-(0.5 * BB_GRAPHICS_HEIGHT),
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-
-	glm::mat4 scaleMatrix(
-		 2.0f / BB_GRAPHICS_WIDTH,0.0f,0.0f,0.0f,
-		 0.0f,2.0f / BB_GRAPHICS_HEIGHT,0.0f,0.0f,
-		 0.0f,0.0f,1.0f,0.0f,
-		 0.0f,0.0f,0.0f,1.0f);
-
-	matrix = translationMatrix * rotationMatrix * scaleMatrix;
-	
-	glGenBuffers(1,&vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STATIC_DRAW);
-
-	glGenBuffers(1,&index_buffer);
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeof(indices),indices,GL_STATIC_DRAW);
-
-	vertex_stride = 3 * sizeof(GLfloat);
-
-	glUseProgram(PRIMITIVE_PROGRAM);
-
-	matrix_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "uMVPMatrix");
-	position_handle = glGetAttribLocation(PRIMITIVE_PROGRAM, "vPosition");
-	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-	
-	glEnableVertexAttribArray(position_handle);
-
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glVertexAttribPointer(position_handle,3,GL_FLOAT,0,vertex_stride,(void*)0);
-        glEnableVertexAttribArray(position_handle);
-	
-	color_handle = glGetUniformLocation(PRIMITIVE_PROGRAM, "vColor");
-
-        GLfloat color[4] = {BB_COLOR_RED / 255.0f,BB_COLOR_GREEN / 255.0f,BB_COLOR_BLUE / 255.0f,BB_ALPHA};
-	
-	glUniform4fv(color_handle, 1, color);
-
-	
-        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
-	glDrawArrays(GL_LINES, 0, 2);
-
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
-	glDisableVertexAttribArray(position_handle);
-	return 0;
+	delete ((CachedRect*)it);
     }
 
+    void free_cached_oval(void *it)
+    {
+	delete [] ((CachedOval*)it)->vertices;
+	delete ((CachedOval*)it);
+    }
+
+    void free_cached_graphics(void *address)
+    {
+	CachedGraphics *graphics = (CachedGraphics*)address;
+	switch(graphics->id)
+	{
+	case GRAPHICS_TYPE_LINE:
+	{
+	    delete ((CachedLine*)graphics->data);
+	    break;
+	}
+	case GRAPHICS_TYPE_RECT:
+	{
+	    delete ((CachedRect*)graphics->data);
+	    break;
+	}
+	case GRAPHICS_TYPE_RECT_HOLLOW:
+	{
+	    delete ((CachedRectHollow*)graphics->data);
+	    break;
+	}
+	case GRAPHICS_TYPE_OVAL:
+	{
+	    delete [] ((CachedOval*)graphics->data)->vertices;
+	    delete ((CachedOval*)graphics->data);
+	    break;
+	}
+	case GRAPHICS_TYPE_OVAL_HOLLOW:
+	{
+	    delete [] ((CachedOvalHollow*)graphics->data)->vertices;
+	    delete ((CachedOvalHollow*)graphics->data);
+	    break;
+	}       
+	}
+	free((CachedGraphics*)graphics);
+    }
+
+    unsigned long long int bb_flip(unsigned long long int sync)
+    {
+	GList *list = GRAPHICS_CACHE;
+	CachedGraphics *cached_graphics;
+	GRAPHICS_CACHE = g_list_reverse(GRAPHICS_CACHE);
+	list = GRAPHICS_CACHE;
+	if(list)
+	{
+	    while(list)
+	    {
+		cached_graphics = (CachedGraphics*)list->data;
+
+		switch(cached_graphics->id)
+		{
+		case GRAPHICS_TYPE_LINE:
+		{
+		    list = batch_line(list);
+		    break;
+		}
+		case GRAPHICS_TYPE_RECT:
+		{
+		    list = batch_rect_filled(list);
+		    break;
+		}
+		case GRAPHICS_TYPE_OVAL:
+		{
+		    list = batch_oval_filled(list);
+		    break;
+		}
+		case GRAPHICS_TYPE_RECT_HOLLOW:
+		{
+		    list = batch_rect_hollow(list);
+		    break;
+		}
+
+		case GRAPHICS_TYPE_OVAL_HOLLOW:
+		{
+		    list = batch_oval_hollow(list);
+		    break;
+		}
+		
+		default:
+		{
+		    list = g_list_next(list);
+		    break;
+		}
+
+		}
+		
+	    }
+	    
+	}
+	g_list_free_full(GRAPHICS_CACHE,free_cached_graphics);
+	GRAPHICS_CACHE = NULL;
+        CachedOval::TOTAL_NUM_VERTICES = 0;
+	CachedOvalHollow::TOTAL_NUM_VERTICES = 0;
+	SDL_GL_SwapWindow(WINDOW);
+    }    
+    
     unsigned long long int bb_clscolor(unsigned long long int red,unsigned long long int green,unsigned long long int blue, unsigned long long int alpha)
     {
 	BB_CLS_COLOR_RED = red;
