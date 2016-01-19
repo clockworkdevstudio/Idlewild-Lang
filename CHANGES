@@ -1,0 +1,8 @@
+0.0.2 (19.1.16)
+
+Fix Windows 7 compatibility bug (unnecessary dependency on shcore.dll).
+Add batch files for easy Windows installation and packaging.
+Add API support for Blitz BASIC style ('safe') memory banks.
+Add support for alpha blending with GetAlpha() and SetAlpha() functions.
+Add 3D acceleration demo "3D.bb" to Examples/ folder.
+Fix null pointer exceptions arising from the use of First and Last operators on empty lists.
