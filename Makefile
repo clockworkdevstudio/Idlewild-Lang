@@ -50,7 +50,7 @@ libkoshka_core.o: libkoshka_core.c
 libkoshka.mm.so: libkoshka_mm.o libkoshka_mm_graphics.o libkoshka_mm_sound.o libkoshka_mm_io.o libkoshka_mm_text.o libkoshka.core.so
 	gcc -shared -o libkoshka.mm.so libkoshka_mm.o libkoshka_mm_graphics.o libkoshka_mm_sound.o libkoshka_mm_io.o libkoshka_mm_text.o -L. -lkoshka.core -lSDL2 -lGL -lGLU -lglut -lGLEW -lSDL2_image -lSDL2_ttf -lSDL2_mixer `pkg-config --libs gtk+-3.0` -lm ${GCC_LINUX_FLAGS}
 
-libkoshka_mm.o: libkoshka_mm.c
+libkoshka_mm.o: libkoshka_mm.c libkoshka_mm.h
 	gcc -c libkoshka_mm.c -DLINUX=1 -o libkoshka_mm.o -fpic `pkg-config --cflags gtk+-3.0` ${GCC_LINUX_FLAGS}
 
 libkoshka_mm_graphics.o: libkoshka_mm_graphics.cpp libkoshka_mm.h
