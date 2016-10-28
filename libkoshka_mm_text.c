@@ -38,7 +38,7 @@ extern unsigned long long int BB_COLOR_GREEN;
 extern unsigned long long int BB_COLOR_BLUE;
 extern unsigned long long int BB_COLOR_ALPHA;
 
-unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y);
+unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,long long int frame);
 
 TTF_Font *BB_CURRENT_FONT;
 
@@ -77,10 +77,13 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,surface->w,surface->h,0,GL_RGBA,GL_UNSIGNED_BYTE,surface->pixels);
 	
     image = (Image*)malloc(sizeof(Image));
-    image->texture = texture;
+    image->textures = (GLuint*)malloc(sizeof(GLuint));
+    image->textures[0] = texture;
     image->surface = surface;
     image->width = surface->w;
     image->height = surface->h;
+    image->width_frames = 1;
+    image->height_frames = 1;
 
     if(center_x)
     {
@@ -100,10 +103,11 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
 	image->handle_y = 0;
     }
 
-    bb_drawimage((unsigned long long int)image,x,y);
+    bb_drawimage((unsigned long long int)image,x,y,0);
     
     SDL_FreeSurface(surface);
     glDeleteTextures(1,&texture);
+    free(image->textures);
     free(image);
     return 0;
 }
