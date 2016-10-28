@@ -1226,7 +1226,7 @@ void *bb_access_array(unsigned long long int *array,unsigned long long int dimen
 	int i;
 
 	cell_size = array[-1];
-
+      
 	va_start(variable_arg_list,dimensionality);
 	for(i = 0; i < dimensionality; i++)
 	{
