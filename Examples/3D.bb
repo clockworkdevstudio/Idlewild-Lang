@@ -5,7 +5,7 @@ Const GRAPHICS_HEIGHT = 768
 Const FLAME_RADIUS = 16
 Const FLAME_CREATE_RATE = 5
 Const SPEED# = 5.0
-Const MAX_NUM_FLAMES = 500
+Const MAX_NUM_FLAMES = 5000
 
 Global NUM_FLAMES = 0
 Global TIMER,PINGS,i
@@ -26,7 +26,7 @@ Graphics GRAPHICS_WIDTH, GRAPHICS_HEIGHT
 
 SetBuffer BackBuffer()
 
-TIMER = CreateTimer(30)
+TIMER = CreateTimer(60)
 	
 While Not KeyHit(1)
 	PINGS = WaitTimer(TIMER)
