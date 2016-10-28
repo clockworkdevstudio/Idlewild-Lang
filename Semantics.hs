@@ -409,7 +409,6 @@ collectGotoLabelSymbol statement =
                sourceName = identifierExpressionValue destination
                name = map toLower sourceName
            
-           trace "collecting goto" (return ())
            symbols <- gets semanticStateSymbols
            localSymbols <- gets semanticStateLocalSymbols
            
@@ -2052,11 +2051,11 @@ nonArithmeticShiftR l r =
   where clearMostSignificantBits value n =
           if n < 0
           then value
-#if LINUX==1
-          else clearMostSignificantBits (clearBit value ((bitSize value) - n)) (n - 1)
-#elif WINDOWS==1
+-- #if LINUX==1
+--          else clearMostSignificantBits (clearBit value ((bitSize value) - n)) (n - 1)
+-- #elif WINDOWS==1
           else clearMostSignificantBits (clearBit value ((fromJust (bitSizeMaybe value)) - n)) (n - 1)
-#endif
+-- #endif
 
 reductionTypeFilter :: Statement -> VariableType -> VariableType -> Statement
 reductionTypeFilter statement destType sourceType
