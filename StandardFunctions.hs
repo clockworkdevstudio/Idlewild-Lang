@@ -161,6 +161,13 @@ idlewildLangStandardFunctions =
       
       declareStandardFunction "loadimage" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_STRING],
+      declareStandardFunction "loadanimimage" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_STRING,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      
       declareStandardFunction "maskimage" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
@@ -196,6 +203,15 @@ idlewildLangStandardFunctions =
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createOptionalParameter [] VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 0])] 8 7,
+      declareStandardFunction "imagescollide" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
       declareStandardFunctionVar "oval" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
