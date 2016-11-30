@@ -665,14 +665,15 @@ expressionLoop depth lhs delimiters =
              if operatorExpressionID op == EXPRESSION_FUNCTION_CALL
              then do if operatorPrecedence op < depth
                      then do return lhs
-                     else do if statementID lhs `elem` typeConversionOperatorList
+                     else do
+                             if statementID lhs `elem` typeConversionOperatorList
                              then do token <- popToken
                                      o <- requireCode (expression 0 [TOKEN_RIGHT_PARENTHESIS]) ("Expecting expression.")
-                                     requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis.1"
+                                     requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis."
                                      expressionLoop depth (createStatement (statementID lhs) token [o]) delimiters
                              else do token <- popToken
                                      f <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [lhs]) [TOKEN_RIGHT_PARENTHESIS]
-                                     requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis.2"
+                                     requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis."
                                      expressionLoop depth f delimiters
               else if statementID lhs `elem` typeConversionOperatorList && statementContents lhs == []
                    then throwParseError "Expecting left parenthesis." token
@@ -745,9 +746,11 @@ ambiguousArgumentList token l =
                            return stmt
                       _ ->
                         do k <- expressionLoop 0 g [TOKEN_COMMA,TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
-                           dropToken
-                           m <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [l,k]) []
-                           return m
+                           t3 <- lookToken
+                           if tokenID t3 `elem` [TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
+                           then do return  (createStatement EXPRESSION_FUNCTION_CALL token [l,k])
+                           else do m <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [l,k]) []
+                                   return m
                     
        _ -> throwParseError ("Expecting comma or right parenthesis.") t1
 
