@@ -1,5 +1,6 @@
 0.0.2 (19.1.16)
 
+Upload binary packages for version 0.0.2.
 Fix Windows 7 compatibility bug (unnecessary dependency on shcore.dll).
 Add batch files for easy Windows installation and packaging.
 Add API support for Blitz BASIC style ('safe') memory banks.
