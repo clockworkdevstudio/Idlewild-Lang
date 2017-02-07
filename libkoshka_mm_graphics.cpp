@@ -56,7 +56,7 @@ extern "C"
     void load_image_program();
     GLuint load_shader(GLenum type, const GLchar **shaderCode,int num_lines);
     unsigned long long int mask_surface(SDL_Surface *surface,GLuint mask_color,GLuint prev_mask_color);
-    unsigned long long int **surface_to_masks(SDL_Surface *surface,int width,int height,int num_frames,GLuint mask_color,unsigned int stride);
+    unsigned long long int **surface_to_masks(SDL_Surface *surface,int width,int height,GLuint mask_color);
     GLuint *surface_to_textures(SDL_Surface *surface,int width,int height,int num_frames,unsigned int stride);
     unsigned long long int bb_oval_filled(long long int x,long long int y,long long int width,long long int height);
 unsigned long long int bb_oval_hollow(long long int x,long long int y,long long int width,long long int height);
@@ -162,13 +162,10 @@ extern "C"
     void show_bin(unsigned long long int in)
     {
 	int i;
-	//printf("BIN\n");
 	for(i = 0; i < 64; i++)
 	{
 	    printf("%lld",(long long unsigned int)((in >> ((8 * sizeof(unsigned long long int) - 1) - i)) & 1));
-	}
-        //printf("\n");
-	
+	}	
     }
     
     unsigned long long int bb_graphics(long long int width,long long int height,unsigned long long int depth, unsigned long long int windowed)
@@ -340,10 +337,10 @@ extern "C"
 	image->height_frames = 1;
 	image->mask_color = 0;
 	mask_surface(surface,0,0);
-	image->masks = surface_to_masks(surface,surface->w,surface->h,1,0,image->width_frames * image->width);
+	image->masks = surface_to_masks(surface,surface->w,surface->h,0);
 
 	image->mask_width = image->width / (8 * sizeof(unsigned long long int));
-	image->mask_height = image->height;// / (8 * sizeof(unsigned long long int));
+	image->mask_height = image->height;
 
 	if(image->width % sizeof(unsigned long long int))
 	    image->mask_width++;
@@ -365,549 +362,237 @@ extern "C"
 	return (unsigned long long int)image;
     }
 
-/*
-    unsigned long long int bb_imagescollide(unsigned long long int image1_handle,long long int image1_x,long long int image1_y,long long int frame1,unsigned long long int image2_handle,long long int image2_x,long long int image2_y,long long int frame2)
-    {
-	Image *image1 = (Image*)image1_handle;
-	Image *image2 = (Image*)image2_handle;
-	int offset_x,offset_y;
-	offset_x = image2_x - image1_x;
-	offset_y = image2_y - image1_y;
-
-	int overlap_x = 0,overlap_y = 0;
-	int overlap_width = 0,overlap_height = 0;
-	int sector_x = 0,sector_y = 0;
-	int remainder = 0;
-	int collision = 0;
-	int x1 = 0,y1 = 0,x2 = 0,y2 = 0;
-	
-	if(offset_x < 0)
-	{
-	    if(offset_y < 0)
-            {
-		if(offset_x + image2->width > 0 && offset_y + image2->height > 0)
-		{
-		    collision = 1;
-		    printf("COLLISION: x negative, y negative\n");
-		    overlap_x = 0;
-		    overlap_y = 0;
-		    overlap_width = image2->width + offset_x;
-		    overlap_height = image2->height + offset_y;
-		}
-	    }
-	    else
-	    {
-		if(offset_x + image2->width > 0 && offset_y < image1->height)
-		{
-		    collision = 1;
-		    printf("COLLISION: x negative, y positive\n");
-		    overlap_x = 0;
-		    overlap_y = offset_y;
-		    overlap_width = image2->width + offset_x;
-		    if(offset_y + image2->height < image1->height)
-		    {
-			overlap_height = image2->height;
-		    }
-		    else
-		    {
-			overlap_height = image1->height - offset_y;
-		    }
-		}
-	    }
-	
-	}
-	else
-	{
-	    if(offset_y < 0)
-            {
-		if(offset_x < image1->width && offset_y + image2->height > 0)
-		{
-		    collision = 1;
-		    printf("COLLISION: x positive, y negative\n");
-		    overlap_x = offset_x;
-		    overlap_y = 0;
-		    if(offset_x + image2->width > image1->width)
-		    {
-			overlap_width = image1->width - offset_x;
-		    }
-		    else
-		    {
-			overlap_width = image2->width;
-		    }
-		    overlap_height = image2->height + offset_y;
-		    
-		}
-
-	    }
-	    else
-	    {
-		if(offset_x < image1->width && offset_y < image1->height)
-		{
-		    collision = 1;
-		    printf("COLLISION: x positive, y positive\n");
-		    overlap_x = offset_x;
-		    overlap_y = offset_y;
-		    if(offset_x + image2->width > image1->width)
-		    {
-			overlap_width = image1->width - offset_x;
-		    }
-		    else
-		    {
-			overlap_width = image2->width;
-		    }
-
-		    if(offset_y + image2->height > image1->height)
-		    {
-			overlap_height = image1->height - offset_y;
-		    }
-		    else
-		    {
-			overlap_height = image2->height;
-
-		    }
-		}
-	    
-	    }
-
-	}
-
-	if(!collision)
-	{
-	    printf("NO COLLISION\n");
-	    return 0;
-	}
-
-	printf("OVERLAP    : %d,%d\n",overlap_x,overlap_y);
-	printf("DIMENSIONS : %d,%d\n",overlap_width,overlap_height);
-
-        int sector_x1 = overlap_x / (8 * sizeof(unsigned long long int));
-	int sector_y1 = overlap_y;
-
-	int sector_x2;
-	int sector_y2;
-
-	if(offset_x < 0)
-	{
-	    sector_x2 = abs(offset_x) / (8 * sizeof(unsigned long long int));
-	}
-	else
-	{
-	    sector_x2 = 0;
-	}
-
-	if(offset_y < 0)
-	{
-	    sector_y2 = abs(offset_y) / (8 * sizeof(unsigned long long int));
-	}
-	else
-	{
-	    sector_y2 = 0;
-	}
-
-	int num_sectors_x1 = overlap_width / (8 * sizeof(unsigned long long int));
-	if(overlap_width % (8 * sizeof(unsigned long long int)))
-	    num_sectors_x1++;
-
-	int num_sectors_y1 = overlap_height;
-
-	int num_sectors_x2,num_sectors_y2;
-	
-	
-        num_sectors_x2 = (overlap_x - offset_x) / (8 * sizeof(unsigned long long int)) + 1;
-	if((overlap_x - offset_x) % (8 * sizeof(unsigned long long int)))
-	    num_sectors_x2++;
-
-	if(offset_y < 0)
-	    num_sectors_y2 = overlap_y + 1;
-	else
-	    num_sectors_y2 = overlap_height;
-	    
-
-	printf("sectors 1 = %d,%d\n",num_sectors_x1,num_sectors_y1);
-	printf("sectors 2 = %d,%d\n",num_sectors_x2,num_sectors_y2);
-
-	unsigned long long int img,ref;
-
-	for(y1 = sector_y1; y1 < num_sectors_y1; y1++)
-	{
-	    for(x1 = sector_x1; x1 < num_sectors_x1; x1++)
-	    {
-		img = image1->masks[frame1][y1 * image1->mask_width + x1];
-		show_bin(img);
-	    }
-	}
-	
-
-/*	
-	sector_x = overlap_x / (8 * sizeof(unsigned long long int));
-	sector_y = overlap_y;
-	
-	unsigned long long int mask;
-	unsigned long long int anded;
-	unsigned long long int shifted;
-	unsigned long long int mask1,mask2;
-	int num_sectors_x = overlap_width / (8 * sizeof(unsigned long long int));
-	if(overlap_width % (8 * sizeof(unsigned long long int)))
-	    num_sectors_x++;
-
-	remainder = overlap_width % (8 * sizeof(unsigned long long int));
-	int x,y;
-        for(y = overlap_y; y < overlap_height; y++)
-	{
-	    for(x = 0; x < num_sectors_x; x++)
-	    {
-		
-	    }
-	}	
-
-    }
-*/
-
     unsigned long long int bb_imagescollide(unsigned long long int image1_handle,long long int image1_x,long long int image1_y,unsigned long long int frame1,unsigned long long int image2_handle,long long int image2_x,long long int image2_y,unsigned long long int frame2)
     {
+
 	Image *image1 = (Image*)image1_handle;
 	Image *image2 = (Image*)image2_handle;
-	long long int offset_x,offset_y;
-	offset_x = image2_x - image1_x;
-	offset_y = image2_y - image1_y;
-
-	long long int overlap_x1 = 0,overlap_y1 = 0;
-	long long int overlap_x2 = 0,overlap_y2 = 0;
-	long long int overlap_width = 0,overlap_height = 0;
-
-	unsigned long long int sector_x = 0,sector_y = 0;
-	long long int remainder = 0;
-	long long int collision = 0;
-	long long int x1 = 0,y1 = 0,x2 = 0,y2 = 0;
-
-	//printf("OFFSET = %lld,%lld\n",offset_x,offset_y);
 	
+	long long int offset_x = image1_x - image2_x;
+	long long int offset_y = image1_y - image2_y;  
+    
+	long long int sector_x1;
+	long long int sector_x2;
+	long long int sector_y1;
+	long long int sector_y2;
+    
+	long long int remainder;
+    
+	long long int overlap_x;
+	long long int overlap_y;
+	long long int overlap_width;
+	long long int overlap_height;
+    
+	long long int overlap_num_sectors_x;
+	long long int overlap_num_sectors_y;
+	
+        long long int IMG1_WIDTH_SECTORS = image1->width / (8 * sizeof(unsigned long long int));
+	if(!IMG1_WIDTH_SECTORS)
+	    IMG1_WIDTH_SECTORS++;
+	long long int IMG1_HEIGHT_SECTORS = image1->height;
+
+        long long int IMG2_WIDTH_SECTORS = image2->width / (8 * sizeof(unsigned long long int));;
+	if(!IMG2_WIDTH_SECTORS)
+	    IMG2_WIDTH_SECTORS++;
+	long long int IMG2_HEIGHT_SECTORS = image2->height;
+
 	if(offset_x < 0)
 	{
-	    if(offset_y < 0)
-            {
-		if(offset_x + image2->width > 0 && offset_y + image2->height > 0)
-
-		{
-		    //exit(1);
-                    //printf("1)\n");
-		    collision = 1;
-
-		    overlap_x1 = 0;//image1->width - abs(offset_x);
-		    overlap_y1 = 0;//image1->height - abs(offset_y);
-		    
-		    overlap_width = std::min(image1->width,((long long int)image1->width) + offset_x);
-		    overlap_height = std::min(image1->height,((long long int)image1->height) + offset_y);
-
-		    overlap_x2 = image2->width - overlap_width;
-		    overlap_y2 = image2->height - overlap_height;
-		    
-		    //printf("overlap width/height = %lld,%lld\n",overlap_width,overlap_height);
-
-	        }
-	    }
-	    else
-	    {
-		if(offset_x + image2->width > 0 && offset_y < image1->height)
-		{
-		    //exit(1);
-		    //printf("2)\n");
-
-		    collision = 1;
-		    //printf("offset = %lld,%lld\n",offset_x,offset_y);
-		    
-
-		    overlap_x1 = 0;
-		    overlap_y1 = offset_y;
-		    overlap_x2 = -offset_x;
-		    overlap_y2 = 0;
-
-		    overlap_width = image2->width + offset_x;
-		    overlap_height = image1->height - offset_y;
-/*
-		    printf("overlap wiz = %lld,%lld\n",overlap_x1,overlap_y1);
-		    printf("overlap til = %lld,%lld\n",overlap_x2,overlap_y2);
-		    printf("width = %lld\n",overlap_width);
-		    printf("height = %lld\n",overlap_height);
-*/
-		    //exit(1);
-		    
-		}
-
-	    }
-	
+	    overlap_x = (image2_x - image1_x);
+	    overlap_width = std::min(image1->width - overlap_x,image2->width);
 	}
 	else
 	{
-	    if(offset_y < 0)
-            {
-		if(offset_y + image2->height > 0 && offset_x < image1->width)
-		{
-		    //exit(1);
-		    //printf("Yeah\n");
-		    //printf("offset y = %d,height = %lld\n",offset_y,image2->height);
-		    //printf("image2_y = %lld, image1_y = %lld\n",image2_y,image1_y);
-		    collision = 1;
-		    overlap_x1 = image1->width - offset_x;
-		    overlap_y1 = 0;
-		    overlap_x2 = 0;
-		    overlap_y2 = image2->height - abs(offset_y);
-
-		    overlap_width = image1->width - (long long int)offset_x;
-		    overlap_height = std::min(image1->height,image2->height - abs(offset_y));
-
-		}
-	    }
-	    else
-	    {
-		if(offset_x < image1->width && offset_y < image1->height)
-		{
-		    //exit(1);
-		    //printf("4)\n");
-		    collision = 1;
-		    overlap_x1 = offset_x;
-		    overlap_y1 = offset_y;
-		    overlap_x2 = 0;
-		    overlap_y2 = 0;
-
-		    overlap_width = std::min(image2->width,image1->width - offset_x);
-		    overlap_height = std::min(image2->height,image1->height - offset_y);		    
-		}
-	    }
-
+	    overlap_x = (image2_x - image1_x);
+	    overlap_width = std::min(image2->width + overlap_x,image1->width);
 	}
-	
-	if(!collision)
+
+	if(offset_y < 0)
 	{
-	    //printf("NO COLLISION\n");
+	    overlap_y = (image2_y - image1_y);
+	    overlap_height = std::min(image1->height - overlap_y,image2->height);
+ 	}
+	else
+	{
+	    overlap_y = (image2_y - image1_y);
+	    overlap_height = std::min(image2->height + overlap_y,image1->height);	    
+	}
+
+	if(overlap_width < 0 || overlap_height < 0)
+	{
 	    return 0;
 	}
-	
-	//printf("num sectors 1 = %d,%d\n",num_sectors_x1,num_sectors_y1);
-	//printf("num sectors 2 = %d,%d\n",num_sectors_x2,num_sectors_y2);
 
-	long long int num_sectors_x,num_sectors_y;
-
-	long long int sector_x1,sector_y1;
-	long long int sector_x2,sector_y2;
-
-	sector_x1 = overlap_x1 / (8 * sizeof(unsigned long long int));
-	sector_y1 = overlap_y1;
-
-	sector_x2 = overlap_x2 / (8 * sizeof(unsigned long long int));
-	sector_y2 = overlap_y2;
-
-	//printf("sectors 1 = %lld,%lld\n",sector_x1,sector_y1);
-	//printf("sectors 2 = %lld,%lld\n",sector_x2,sector_y2);	
-
-	//printf("overlap 1 = %lld,%lld\n",overlap_x1,overlap_y1);
-	//printf("overlap 2 = %lld,%lld\n",overlap_x2,overlap_y2);
-
-	printf(" ");
-	
-	num_sectors_x = overlap_width / (8 * sizeof(unsigned long long int));
-	if(overlap_width % (8 * sizeof(unsigned long long int)))
-	    num_sectors_x++;
-
-	num_sectors_y = overlap_height + 1;	
-
-        //printf("num_sectors = %lld,%lld\n",num_sectors_x,num_sectors_y);
-	//printf("mask widths = %lld,%lld\n",image1->mask_width,image2->mask_width);
-
-	unsigned long long int x,y;
-	unsigned long long int img1,img2,img3,shifted;
-	remainder = abs(offset_x) % (8 * sizeof(unsigned long long int));
-
-	for(y = 0; y < num_sectors_y; y++)
+	if(overlap_x > image1->width || overlap_y > image1->height)
 	{
-	    for(x = 0; x < num_sectors_x; x++)
-	    {
-		if((y + sector_y2) * image2->mask_width + x + sector_x2 >= 1024)
-		    goto skip;
-		
-		img1 = image1->masks[frame1][(y + sector_y1) * image1->mask_width + x + sector_x1];
-		img2 = image2->masks[frame2][(y + sector_y2) * image2->mask_width + x + sector_x2];
-
-		//printf("\n\n");
-		//show_bin(img1);
-		//printf("\n");
-		//show_bin(img2);
-		//printf("\n");
-
-		if(offset_x < 0)
-		{
-		    shifted = img2 << remainder;
-		    //show_bin(shifted);
-		    //printf("\n");
-		    //exit(1);
-		    if(img1 & shifted)
-			return 1;//exit(1);
-		}
-		else
-		{
-		    shifted = img2 >> remainder;
-		    //show_bin(shifted);
-		    //exit(1);
-		    if(img1 & shifted)
-			return 1;
-		    //printf("\n");
-		}
-
-	    }
+	    return 0;
 	}
 
-      
-
-    skip:
-	//exit(1);
-	return 0;
-	
-    }
-    
-
-	/*
-    unsigned long long int bb_loadanimimage(char *file_name,unsigned long long int width,unsigned long long int height,unsigned long long int first,unsigned long long int num_frames)
-    {
-	SDL_Surface* surface = IMG_Load(file_name);
-	Image *image;
-	GLuint *textures;
-	int x,y,i,j,k,l;
-	unsigned int *pixels;
-	unsigned int stride;
-
-	if(surface->w % width || surface->h % height)
+	if(offset_x < 0 && offset_y < 0)
 	{
-	    SDL_FreeSurface(surface);
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"Image '%s': width/height does not divide exactly into frame count provided.",file_name);
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	    sector_x1 = abs(overlap_x / (8 * sizeof(unsigned long long int)));
+	    sector_y1 = abs(overlap_y);   
+	    sector_x2 = 0;
+	    sector_y2 = 0;
+   
 	}
-	
-	if(surface->format->BytesPerPixel != 4)
+	else if(offset_x < 0 && offset_y >= 0)
 	{
-	    SDL_FreeSurface(surface);
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"Image '%s' does not have an alpha channel.",file_name);
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
+	    sector_x1 = abs(overlap_x / (long long int)(8 * sizeof(unsigned long long int)));
+	    sector_y1 = 0;
+
+	    sector_x2 = 0;
+	    sector_y2 = abs(overlap_y);   
 	}
-
-	image = (Image*)malloc(sizeof(Image));
-	image->textures = (GLuint*)malloc(num_frames * sizeof(GLuint));
-	image->surface = surface;
-	image->width = width;
-	image->height = height;
-	image->width_frames = surface->w / width;
-	image->height_frames = surface->h / height;
-        //printf("surface dims = %d, %d\n",surface->w,surface->h);
-	stride = image->width_frames * width;
-
-	k = 0;
-	l = 0;
-
-	for(i = 0; i < num_frames; i++)
+	else if(offset_x >= 0 && offset_y < 0)
 	{
-	    j = 0;
-	    pixels = (unsigned int*)malloc(width * height * sizeof(unsigned int));
-	    for(y = k; y < k + height; y++)
-	    {
-		for(x = l; x < l + width; x++)
-		{
-		    pixels[j] = ((unsigned int*)surface->pixels)[y * stride + x];
-		    j++;
-                }
-	    }
-
-	    if(x == surface->w)
-	    {
-		l = 0;
-		k = y;
-	    }
-	    else
-	    {
-	        k = y - height;
-		l = x;
-	    }
-
-	    glGenTextures(1,image->textures + i);
-	    glBindTexture(GL_TEXTURE_2D,image->textures[i]);
-	
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-	    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,width,height,0,GL_RGBA,GL_UNSIGNED_BYTE,pixels);
-
-	    free(pixels);
-	}
-	
-	if(BB_AUTOMIDHANDLE)
-	{
-	    image->handle_x = image->width / 2;
-	    image->handle_y = image->height / 2;
+	    sector_x1 = 0;
+	    sector_y1 = abs(overlap_y);
+	    sector_x2 = abs(overlap_x / (long long int)(8 * sizeof(unsigned long long int)));
+	    sector_y2 = 0;
 	}
 	else
 	{
-	    image->handle_x = 0;
-	    image->handle_y = 0;
+	    sector_x1 = 0;
+	    sector_y1 = 0;
+	    sector_x2 = abs(overlap_x / (long long int)(8 * sizeof(unsigned long long int)));
+	    sector_y2 = abs(overlap_y);
 	}
 
-	return (unsigned long long int)image;
+	remainder = abs(overlap_x % (long long int)(8 * sizeof(unsigned long long int)));
+		
+	overlap_num_sectors_x = abs(overlap_width) / (((long long int)(8 * sizeof(unsigned long long int))));
+	overlap_num_sectors_y = abs(overlap_height);
 
-    }
-    
-    unsigned long long int bb_maskimage(unsigned long long int image_handle,unsigned long long int red,unsigned long long int green,unsigned long long int blue)
-    {
-	
-	GLuint *textures;
-	Image *image = (Image*)image_handle;
-	int mask = red << 16 | green << 8 | blue;
-	int i;
-	int num_frames = image->width_frames * image->height_frames;
+	if(remainder)
+	    overlap_num_sectors_x++;
 
-	for(i = 0; i < num_frames; i++)
+	long long int i,j;
+	long long int x,y;
+	unsigned long long int fish,cats;
+        
+	if(IMG1_WIDTH_SECTORS >= IMG2_WIDTH_SECTORS)
 	{
-	    glDeleteTextures(1,image->textures + i);
-	}
-	
-	for(i = 0; i < (image->surface->w * image->surface->h); i++)
-	{
-	    if((((int*)image->surface->pixels)[i] & 0x00FFFFFF) == mask)
+	    for(y = 0; y < overlap_num_sectors_y; y++)
 	    {
-		((int*)image->surface->pixels)[i] &= 0x00FFFFFF;
+		for(x = 0; x < overlap_num_sectors_x; x++)
+		{
+		    if(x >= IMG2_WIDTH_SECTORS)
+		    {
+			i = sector_x1 + (x) + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			j = sector_x2 + (x) - 1 + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+			fish = image1->masks[frame1][i];
+			cats = image2->masks[frame2][j] << ((8 * sizeof(unsigned long long int)) - remainder);
+			if(fish & cats)
+			    return 1;
+			    
+		    }
+		    else
+		    {
+			i = sector_x1 + (x) + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			j = sector_x2 + (x) + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+			fish = image1->masks[frame1][i];
+			if(overlap_x >= 0)
+			cats = image2->masks[frame2][j] >> remainder;
+			else
+			cats = image2->masks[frame2][j] << remainder;		        
+
+                        if(remainder)
+                        {
+			  if(overlap_x >= 0)
+			  {
+			    if(x)
+			    {
+			        j = (sector_x2 + (x) - 1) + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+			        cats |= image2->masks[frame2][j] << ((8 * sizeof(unsigned long long int)) - remainder);
+			    }
+		          }
+			  else
+			  {
+			  
+			    if(x < overlap_num_sectors_x - 1)
+			    {
+			        j = (sector_x2 + (x) + 1) + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+			        cats |= image2->masks[frame2][j] >> ((8 * sizeof(unsigned long long int)) - remainder);
+			    }
+			  }
+                        }
+			
+			if(fish & cats)
+			{
+			    return 1;
+			}		    
+		    }
+		}
+	    }
+	}
+	else
+	{
+	    for(y = 0; y < overlap_num_sectors_y; y++)
+	    {
+		for(x = 0; x < overlap_num_sectors_x; x++)
+		{
+                    if(x >= IMG1_WIDTH_SECTORS)
+		    {
+
+			i = sector_x1 + (x) - 1 + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			j = sector_x2 + (x) + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+			fish = image2->masks[frame2][j];
+			cats = image1->masks[frame1][i] << ((8 * sizeof(unsigned long long int)) - remainder);
+			if(fish & cats)
+			    return 1;
+			    
+		    }
+		    else
+		    {
+			i = sector_x1 + (x) + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			j = sector_x2 + (x) + (sector_y2 + y) * IMG2_WIDTH_SECTORS;
+		  
+			fish = image2->masks[frame2][j];
+			if(overlap_x < 0)
+			    cats = image1->masks[frame1][i] >> remainder;
+			else
+			    cats = image1->masks[frame1][i] << remainder;    
+		 
+
+                        if(remainder)
+                        {
+			  if(overlap_x < 0)
+			  {
+			    if(x)
+			    {
+			        i = sector_x1 + (x) - 1 + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			        cats |= image1->masks[frame1][i] << ((8 * sizeof(unsigned long long int)) - remainder);
+			    }
+		          }
+			  else
+			  {
+			    if(x < overlap_num_sectors_x - 1)
+			    {
+		               i = sector_x1 + (x) + 1 + (sector_y1 + y) * IMG1_WIDTH_SECTORS;
+			       cats |= image1->masks[frame1][i] >> ((8 * sizeof(unsigned long long int)) - remainder);
+		            }
+		          }
+			}
+		    
+			if(fish & cats)
+			{
+			    return 1;
+			}		    
+		    }
+		}
 	    }
 	}
 
-	for(i = 0; i < num_frames; i++)
-	{
-	    glGenTextures(1,textures + i);
-	    glBindTexture(GL_TEXTURE_2D,texture);
-
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-	    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-
-	    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,image->surface->w,image->surface->h,0,GL_RGBA,GL_UNSIGNED_BYTE,image->surface->pixels);
-	    image->texture = texture;
-	}
+	return 0;
 	
     }
-    
-    unsigned long long int bb_handleimage(unsigned long long int image_handle,long long int x,long long int y)
-    {
-	Image *image = (Image*)image_handle;
-	image->handle_x = x;
-	image->handle_y = y;
-	return 0;
-    }
-*/
-
 
     unsigned long long int bb_loadanimimage(char *file_name,unsigned long long int width,unsigned long long int height,unsigned long long int first,unsigned long long int num_frames)
     {
 	SDL_Surface* surface = IMG_Load(file_name);
 	Image *image;
 	unsigned int stride;
-	//GLuint *textures;
-	//int x,y,i,j,k,l;
 
 	if(surface->w % width || surface->h % height)
 	{
@@ -933,10 +618,10 @@ extern "C"
 	image->height_frames = surface->h / height;
 	image->mask_color = 0;
         stride = image->width_frames * width;
-	image->textures = surface_to_textures(surface,width,height,num_frames,stride);//(GLuint*)malloc(num_frames * sizeof(GLuint));
-	image->masks = surface_to_masks(surface,width,height,num_frames,0,stride);
+	image->textures = surface_to_textures(surface,width,height,num_frames,stride);
+	image->masks = surface_to_masks(surface,width,height,0);
 	image->mask_width = image->width / (8 * sizeof(unsigned long long int));
-	image->mask_height = image->height;// / (8 * sizeof(unsigned long long int));
+	image->mask_height = image->height;
 
 	if(BB_AUTOMIDHANDLE)
 	{
@@ -959,7 +644,7 @@ extern "C"
 	GLuint mask_color = red << 16 | green << 8 | blue;
 	GLuint prev_mask_color = image->mask_color;
 	mask_surface(image->surface,mask_color,prev_mask_color);
-	image->masks = surface_to_masks(image->surface,image->width,image->height,image->width_frames * image->height_frames,mask_color,image->width_frames * image->width);
+	image->masks = surface_to_masks(image->surface,image->width,image->height,mask_color);
 	image->textures = surface_to_textures(image->surface,image->width,image->height,image->width_frames * image->height_frames,image->width_frames * image->width);
     }
 
@@ -972,7 +657,7 @@ extern "C"
 	int x = 0;
 	int y = 0;
 	unsigned int *pixels;
-	//unsigned int stride;
+	
 	GLuint *textures = (GLuint*)malloc(num_frames * sizeof(GLuint));;
 	
 	for(i = 0; i < num_frames; i++)
@@ -1014,103 +699,66 @@ extern "C"
 	return textures;
 
     }
-    
-    unsigned long long int **surface_to_masks(SDL_Surface *surface,int width,int height,int num_frames,GLuint mask_color,unsigned int stride)
+
+    unsigned long long int **surface_to_masks(SDL_Surface *surface,int width,int height,GLuint mask_color)
     {
-	int i = 0;
-	//int j = 0;
-	int k = 0;
-	int l = 0;
-	int x = 0;
-	int y = 0;
+	unsigned long long int **masks;
 	unsigned long long int *pixels;
-	unsigned int mask_width,mask_height;
-	unsigned int offset,sector_x,sector_y;
-
-	mask_width = width / (8 * sizeof(unsigned long long int));// + 1;
-	mask_height = height;// / sizeof(unsigned long long int);
-
-	if(width % (8 * sizeof(unsigned long long int)))
-	    mask_width++;
-
-	if(height % (8 * sizeof(unsigned long long int)))
-	    mask_height++;
 	
-	unsigned long long int **masks = (unsigned long long int**)malloc(num_frames * sizeof(unsigned long long int));
-	memset(masks,0,num_frames * sizeof(unsigned long long int));
-        
-	for(i = 0; i < num_frames; i++)
+	unsigned long long int width_sectors;
+	unsigned long long int height_sectors;
+
+	unsigned long long int width_frames;
+	unsigned long long int height_frames;
+	unsigned long long int num_frames;
+
+	unsigned long long int frame,x,y,quotient,remainder;
+	int value;
+	int pixel_x;
+	int pixel_y;
+
+	width_sectors = width / (8 * sizeof(unsigned long long int));
+	if(!width_sectors)
+	    width_sectors++;
+	
+	if(width % (8 * sizeof(unsigned long long int))&& width_sectors > 1)
+	    width_sectors++;
+	
+	width_frames = surface->w / width;
+	height_frames = surface->h / height;
+	num_frames = width_frames * height_frames;
+
+	masks = (unsigned long long int**)malloc(num_frames * sizeof(unsigned long long int*));
+        int xf,yf;
+	
+	for(frame = 0; frame < num_frames; frame++)
 	{
-	    //j = 0;
-	    pixels = (unsigned long long int*)malloc((mask_width + 0) * mask_height * sizeof(unsigned long long int));
-	    //printf("kk %u %u\n",mask_width,mask_height);
-	    memset(pixels,0,(mask_width + 0) * mask_height * sizeof(unsigned long long int));
-	    //exit(1);
-	    for(y = k; y < k + height; y++)
+	    pixels = (unsigned long long int*)malloc(width_sectors * height * sizeof(unsigned long long int*));
+	    memset(pixels,0,width_sectors * height * sizeof(unsigned long long int*));
+	    
+	    yf = frame / width_frames * surface->w * height;
+	    xf = frame % width_frames * width;
+
+	    unsigned long long int z;
+	    for(y = 0; y < height; y++)
 	    {
-		offset = 0;
-		//printf("Start x loop\n\n");
-		for(x = l; x < l + width; x++)
+		for(x = 0; x < width; x++)
 		{
-		    //printf("write %d\n",x);
-		    //offset = x % (8 * sizeof(unsigned long long int));
-                    
-		    sector_x = x / (8 * sizeof(unsigned long long int));
-		    //printf("sector_x = %d\n",sector_x);
-		    sector_y = y - k;/// (8 * sizeof(unsigned long long int));
-		    //printf("sector_y = %d\n",sector_y);
-		    if((((int*)surface->pixels)[y * stride + x] & 0x00FFFFFF) == mask_color)
+		    value = ((int*)surface->pixels)[xf + x + yf + y * surface->w];
+
+		    if((value & 0x00FFFFFF) != mask_color)
 		    {
-		        //printf("0");
-			//printf("%lld",(pixels[sector_y * mask_width + sector_x] >> offset) & 1);
+			quotient = x / (8 * sizeof(unsigned long long int));
+			remainder = x % (8 * sizeof(unsigned long long int));
+                        pixels[quotient + y * width_sectors] |= (0x8000000000000000 >> remainder);
 		    }
-		    else
-		    {
-			//printf("1");
-			pixels[sector_y * (mask_width - 1) + sector_x] |= (0x8000000000000000 >> offset);
-
-		        //printf("%lld",(long long unsigned int)((pixels[sector_y * mask_width + sector_x] >> ((8 * sizeof(unsigned long long int) - 1) - offset)) & 1));
-		    }
-
-		    offset = (offset + 1) % (8 * sizeof(unsigned long long int));
-		    //j++;
-                }
-	        //printf("\n");
+		    
+		}				
 	    }
 
-	    if(x == surface->w)
-	    {
-		l = 0;
-		k = y;
-	    }
-	    else
-	    {
-	        k = y - height;
-		l = x;
-	    }
-
-	    masks[i] = pixels;
-	    //free(pixels);
+	    masks[frame] = pixels;
 	}
-	//printf("\n\n");
-	int m,s,z;
-	z = 0;
-	for(m = 0; m < num_frames; m++)
-	{
-	    for(s = 0; s < (mask_width -1) * mask_height; s++)
-	    {
-		z++;
-		//show_bin(masks[m][s]);
-		if(z == 4)
-		{
-		    z = 0;
-		    //printf("\n");
-		}
 
-	    }
-	    //printf("\n");
-
-	}
 	return masks;
 
 
@@ -1187,7 +835,6 @@ char *dummy_error(GLuint error)
     return (char*)"";
 }
 
-    /*
     unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,unsigned long long int frame)
     {
 	GLuint error;
@@ -1210,175 +857,6 @@ char *dummy_error(GLuint error)
 			       1.0f,1.0f,0.0f,1.0f};
 	
 	GLushort indices [] = {0,1,2,3};
-	glm::vec3 axis(0.0f,0.0f,-1.0f);
-	glm::mat4 rotation_matrix = glm::rotate(((float)BB_ORIENTATION) / 360.0f * 2.0f * ((float)BB_PI),axis);
-        glm::mat4 matrix;
-
-	glm::mat4 scale_matrix1(
-	    0.5 * float(image->width) * BB_SCALE_X,0.0f,0.0f,0.0f,
-	    0.0f,0.5 * float(image->height) * BB_SCALE_Y,0.0f,0.0f,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-
-	glm::mat4 scale_matrix2(
-	    (2.0f / BB_GRAPHICS_WIDTH),0.0f,0.0f,0.0f,
-	     0.0f,(2.0f / BB_GRAPHICS_HEIGHT),0.0f,0.0f,
-	     0.0f,0.0f,1.0f,0.0f,
-	     0.0f,0.0f,0.0f,1.0f);	
-
-	float offset_by_x = (((float)x) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_y = (((float)y) / BB_GRAPHICS_HEIGHT) * 2.0f;
-	    
-	float offset_by_handle_x = ((0.5f * (image->width * BB_SCALE_X) - image->handle_x) / (BB_GRAPHICS_WIDTH)) * 2.0f;
-	float offset_by_handle_y = ((0.5f * (image->height * BB_SCALE_Y) - image->handle_y) / (BB_GRAPHICS_HEIGHT)) * 2.0f;
-
-	float offset_by_origin_x = (((float)BB_ORIGIN_X) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_origin_y = (((float)BB_ORIGIN_Y) / BB_GRAPHICS_HEIGHT) * 2.0f;
-
-	glm::mat4 translation_matrix1(
-	    1.0f,0.0f,0.0f,0.5 * image->width - image->handle_x,
-	    0.0f,1.0f,0.0f,-0.5f * image->height + image->handle_y,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-	
-	glm::mat4 translation_matrix2(
-	    1.0f,0.0f,0.0f,-1.0f + offset_by_x + offset_by_origin_x,
-	    0.0f,1.0f,0.0f,1.0f - offset_by_y - offset_by_origin_y,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-	
-        matrix = scale_matrix1 * translation_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix2;
-        	
-	glGenBuffers(1,&vertex_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glBufferData(GL_ARRAY_BUFFER,sizeof(vertices),vertices,GL_STATIC_DRAW);
-
-	glGenBuffers(1,&index_buffer);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER,sizeof(indices),indices,GL_STATIC_DRAW);
-	
-	glUseProgram(IMAGE_PROGRAM);
-
-	error = glGetError();
-	if( error != GL_NO_ERROR )
-	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"xxx.1 %d %s\n",error,dummy_error(error));
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
-	}
-	
-	matrix_handle = glGetUniformLocation(IMAGE_PROGRAM, "uMVPMatrix");
-	texture_handle = glGetUniformLocation(IMAGE_PROGRAM, "texture_");
-	x1_handle = glGetUniformLocation(IMAGE_PROGRAM,"x1");
-	y1_handle = glGetUniformLocation(IMAGE_PROGRAM,"y1");
-	x2_handle = glGetUniformLocation(IMAGE_PROGRAM,"x2");
-	y2_handle = glGetUniformLocation(IMAGE_PROGRAM,"y2");
-        a_handle = glGetUniformLocation(IMAGE_PROGRAM,"a");
-	position_handle = glGetAttribLocation(IMAGE_PROGRAM, "vPosition");
-	
-	glUniformMatrix4fv(matrix_handle,1,0, glm::value_ptr(matrix));
-
-	x1 = 0.0f;
-	y1 = 0.0f;
-	x2 = 1.0f;
-	y2 = 1.0f;
-	a = BB_ALPHA;
-	
-	glUniform1f(x1_handle,x1);
-	glUniform1f(y1_handle,y1);
-	glUniform1f(x2_handle,x2);
-	glUniform1f(y2_handle,y2);
-	glUniform1f(a_handle,a);
-	
-	glActiveTexture(GL_TEXTURE0);
-	glBindTexture(GL_TEXTURE_2D,image->textures[frame]);
-	glUniform1i(texture_handle,0);
-	
-	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
-	glVertexAttribPointer(position_handle,4,GL_FLOAT,0,sizeof(GLfloat) * 4,(void*)0);
-	glEnableVertexAttribArray(position_handle);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,index_buffer);	
-	
-	glDrawElements(GL_TRIANGLE_STRIP,4,GL_UNSIGNED_SHORT,(void*)0);
-	
-	error = glGetError();
-	if( error != GL_NO_ERROR )
-	{
-	    sprintf(LIBKOSHKA_GRAPHICS_ERROR,"%s\n",dummy_error(error));
-	    bb_fatal_error(LIBKOSHKA_GRAPHICS_ERROR);
-	}
-	glDeleteBuffers(1,&vertex_buffer);
-	glDeleteBuffers(1,&index_buffer);
-	glDisableVertexAttribArray(position_handle);
-    }
-    */
-
-
-    unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,unsigned long long int frame)
-    {
-	GLuint error;
-	GLuint vertex_buffer;
-	GLuint index_buffer;
-	GLint matrix_handle;
-	GLfloat x1,y1,x2,y2,a;
-	GLint x1_handle;
-	GLint y1_handle;
-	GLint x2_handle;
-	GLint y2_handle;
-	GLint a_handle;
-	GLint texture_handle;
-	GLint position_handle;
-	Image *image = (Image*)image_handle;
-
-	GLfloat vertices [] = {-1.0f,-1.0f,0.0f,1.0f,
-			       1.0f,-1.0f,0.0f,1.0f,
-			       -1.0f,1.0f,0.0f,1.0f,
-			       1.0f,1.0f,0.0f,1.0f};
-	
-	GLushort indices [] = {0,1,2,3};
-
-	/*
-	glm::vec3 axis(0.0f,0.0f,-1.0f);
-	glm::mat4 rotation_matrix = glm::rotate(((float)BB_ORIENTATION) / 360.0f * 2.0f * ((float)BB_PI),axis);
-        glm::mat4 matrix;
-
-	glm::mat4 scale_matrix1(
-	    0.5 * float(image->width) * BB_SCALE_X,0.0f,0.0f,0.0f,
-	    0.0f,0.5 * float(image->height) * BB_SCALE_Y,0.0f,0.0f,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-
-	glm::mat4 scale_matrix2(
-	    (2.0f / BB_GRAPHICS_WIDTH),0.0f,0.0f,0.0f,
-	     0.0f,(2.0f / BB_GRAPHICS_HEIGHT),0.0f,0.0f,
-	     0.0f,0.0f,1.0f,0.0f,
-	     0.0f,0.0f,0.0f,1.0f);	
-
-	float offset_by_x = (((float)x) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_y = (((float)y) / BB_GRAPHICS_HEIGHT) * 2.0f;
-	    
-	float offset_by_handle_x = ((0.5f * (image->width * BB_SCALE_X) - image->handle_x) / (BB_GRAPHICS_WIDTH)) * 2.0f;
-	float offset_by_handle_y = ((0.5f * (image->height * BB_SCALE_Y) - image->handle_y) / (BB_GRAPHICS_HEIGHT)) * 2.0f;
-
-	float offset_by_origin_x = (((float)BB_ORIGIN_X) / BB_GRAPHICS_WIDTH) * 2.0f;
-	float offset_by_origin_y = (((float)BB_ORIGIN_Y) / BB_GRAPHICS_HEIGHT) * 2.0f;
-
-	glm::mat4 translation_matrix1(
-	    1.0f,0.0f,0.0f,0.5 * image->width - image->handle_x,
-	    0.0f,1.0f,0.0f,-0.5f * image->height + image->handle_y,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-	
-	glm::mat4 translation_matrix2(
-	    1.0f,0.0f,0.0f,-1.0f + offset_by_x + offset_by_origin_x,
-	    0.0f,1.0f,0.0f,1.0f - offset_by_y - offset_by_origin_y,
-	    0.0f,0.0f,1.0f,0.0f,
-	    0.0f,0.0f,0.0f,1.0f);
-	
-        matrix = scale_matrix1 * translation_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix2;
-	*/
-//###
 	
 	glm::vec3 axis(0.0f,0.0f,-1.0f);
 	glm::mat4 rotation_matrix = glm::rotate(((float)BB_ORIENTATION) / 360.0f * 2.0f * ((float)BB_PI),axis);
@@ -1412,9 +890,6 @@ char *dummy_error(GLuint error)
 	     0.0f,0.0f,0.0f,1.0f);
 	
         matrix = scale_matrix1 * rotation_matrix * scale_matrix2 * translation_matrix;
-
-//###
-
 	
 	glGenBuffers(1,&vertex_buffer);
 	glBindBuffer(GL_ARRAY_BUFFER,vertex_buffer);
@@ -2257,8 +1732,6 @@ char *dummy_error(GLuint error)
         cached_rect->vertices[5] = glm::vec4(1.0,1.0,0.0,1.0) * matrix;
         cached_rect->color = glm::vec4(BB_COLOR_RED / 255.0,BB_COLOR_GREEN / 255.0,BB_COLOR_BLUE / 255.0,BB_ALPHA);
 
-	//printf("vertices x = %f,%f,%f,%f,%f,%f\n",(cached_rect->vertices[0].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH,(cached_rect->vertices[1].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH,(cached_rect->vertices[2].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH,(cached_rect->vertices[3].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH,(cached_rect->vertices[4].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH,(cached_rect->vertices[5].x + 1.0) / 2.0 * BB_GRAPHICS_WIDTH);
-	
 	GRAPHICS_CACHE = g_list_prepend(GRAPHICS_CACHE,(void*)cached_graphics);
 	
     }
