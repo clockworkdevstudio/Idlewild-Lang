@@ -4,13 +4,13 @@ Copyright (c) 2014-2017, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met: 
+modification, are permitted provided that the following conditions are met:
 
 1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer. 
+   list of conditions and the following disclaimer.
 2. Redistributions in binary form must reproduce the above copyright notice,
    this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution. 
+   and/or other materials provided with the distribution.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -28,32 +28,33 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#if MAC_OS!=1
 #include <malloc.h>
+#endif
 #include <string.h>
 #include <math.h>
 #include <time.h>
+
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_mixer.h>
-#include <GL/glew.h>
-#include <GL/glext.h>
 #include <SDL2/SDL_opengl.h>
-#include <GL/glu.h>
+
+#include "libkoshka_mm_io.h"
 
 #if WINDOWS==1
 #include <windows.h>
 #endif
 
+#if !(MAC_OS==1)
 #include <glib.h>
+#endif
 
 #if LINUX==1
 char *NEW_LINE = "\n";
 #elif WINDOWS==1
 char *NEW_LINE = "\r\n";
 #endif
-
-extern long long int BB_KEYBOARD[];
-extern long long int SDL_KEYBOARD[];
 
 typedef struct
 {
@@ -65,47 +66,39 @@ void init_scancode_translation();
 void bb_init_libkoshka_core(unsigned long long int max_gosub_depth);
 void bb_final_libkoshka_core();
 void bb_fatal_error(char *msg);
- 
+
 void bb_init_libkoshka_mm(unsigned long long int max_gosub_depth)
 {
-    /*
-    BB_MAX_GOSUB_DEPTH = max_gosub_depth;
-    BB_GOSUB_STACK = malloc(max_gosub_depth * sizeof(unsigned long long int));
-    memset(BB_GOSUB_STACK,0,sizeof(long long int) * BB_MAX_GOSUB_DEPTH);
-    BB_GOSUB_STACK_POINTER = 0;
-    
-    BB_FATAL_ERROR_FILE_NAME = "";
-    */
     bb_init_libkoshka_core(max_gosub_depth);
-    
+
     memset(BB_KEYBOARD,0,sizeof(long long int) * SDL_NUM_SCANCODES);
     memset(SDL_KEYBOARD,0,sizeof(long long int) * SDL_NUM_SCANCODES);
 
     init_scancode_translation();
-    
+
     if(SDL_Init(SDL_INIT_EVERYTHING))
     {
-	char msg[256];
-	sprintf(msg,"SDL initialisation error: %s\n",SDL_GetError());
-	bb_fatal_error(msg);
+        char msg[256];
+        sprintf(msg,"SDL initialisation error: %s\n",SDL_GetError());
+        bb_fatal_error(msg);
     }
-    
+
     if(TTF_Init())
     {
-	char msg[256];
-	sprintf(msg,"SDL_ttf initialisation error.\n");
-	bb_fatal_error(msg);
+        char msg[256];
+        sprintf(msg,"SDL_ttf initialisation error.\n");
+        bb_fatal_error(msg);
     }
-    
+
     if(Mix_OpenAudio(22050, MIX_DEFAULT_FORMAT, 2, 1024))
     {
-	char msg[256];
-	sprintf(msg,"SDL_Mixer initialisation error: %s.\n",Mix_GetError());
-	bb_fatal_error(msg);
+        char msg[256];
+        sprintf(msg,"SDL_Mixer initialisation error: %s.\n",Mix_GetError());
+        bb_fatal_error(msg);
     }
-    
+
     Mix_AllocateChannels(32);
-    
+
 }
 
 void init_scancode_translation()
@@ -223,7 +216,7 @@ void init_scancode_translation()
     BB_KEYBOARD[149] = SDL_SCANCODE_STOP;
 
     BB_KEYBOARD[153] = SDL_SCANCODE_AUDIONEXT;
-    
+
     BB_KEYBOARD[156] = SDL_SCANCODE_KP_ENTER;
     BB_KEYBOARD[157] = SDL_SCANCODE_RCTRL;
 
@@ -269,14 +262,14 @@ void init_scancode_translation()
 
     BB_KEYBOARD[229] = SDL_SCANCODE_AC_SEARCH;
     BB_KEYBOARD[231] = SDL_SCANCODE_AC_REFRESH;
-    BB_KEYBOARD[232] = SDL_SCANCODE_AC_STOP; 
+    BB_KEYBOARD[232] = SDL_SCANCODE_AC_STOP;
     BB_KEYBOARD[233] = SDL_SCANCODE_AC_FORWARD;
     BB_KEYBOARD[234] = SDL_SCANCODE_AC_BACK;
     BB_KEYBOARD[235] = SDL_SCANCODE_COMPUTER;
     BB_KEYBOARD[236] = SDL_SCANCODE_MAIL;
-    BB_KEYBOARD[237] = SDL_SCANCODE_MEDIASELECT; 
-    
-    
+    BB_KEYBOARD[237] = SDL_SCANCODE_MEDIASELECT;
+
+
 }
 
 void bb_final_libkoshka_mm()
@@ -302,13 +295,14 @@ unsigned long long int bb_waittimer(unsigned long long int timer_handle)
 
     do
     {
-	elapsed = SDL_GetTicks() - timer->time;
-	if(!(elapsed < (1000.0f / timer->frequency)))
-	    break;
-	else
-	    SDL_Delay(0);
-    } while(1);
-	    
+        elapsed = SDL_GetTicks() - timer->time;
+        if(!(elapsed < (1000.0f / timer->frequency)))
+            break;
+        else
+            SDL_Delay(0);
+    }
+    while(1);
+
     pings = elapsed / ((long long int)(1000.0f / timer->frequency));
     timer->time += pings * ((long long int)(1000.0f / timer->frequency));
     return pings;

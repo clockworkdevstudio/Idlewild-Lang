@@ -101,7 +101,7 @@ rdi = Register "rdi" 0 False False
 r10 = Register "r10" 0 False False
 r11 = Register "r11" 0 False False
 
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
 functionCallRegisters = [rdi, rsi, rdx, rcx, r8, r9]
 scratchRegisters = [rcx, rdx, rsi, rdi, r8, r9, r10, r11]
 preservedRegisters = [rbx, rbp, r12, r13, r14, r15]
@@ -117,7 +117,7 @@ numPreservedRegisters = 8
 
 multimediaRegisterNames = ["xmm0", "xmm1", "xmm2", "xmm3", "xmm4", "xmm5", "xmm6", "xmm7"]
 
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
 numFunctionCallGPRs :: Int
 numFunctionCallGPRs = 6
 
@@ -134,14 +134,14 @@ numFunctionCallMMRs = 4
 numFPRs :: Int
 numFPRs = 8
 
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
 allRegisters = [rbx, r12, r13, r14, r15, r9, r8, rcx, rdx, rsi, rdi, r10, r11]
 #elif WINDOWS==1
 allRegisters = [rbx, rsi, rdi, r12, r13, r14, r15, r9, r8, rdx, rcx, r10, r11]
 #endif
 
 sizeOfShadowSpace :: Int
-#if LINUX == 1
+#if LINUX == 1 || MAC_OS == 1
 sizeOfShadowSpace = 0
 #elif WINDOWS == 1
 sizeOfShadowSpace = 4

@@ -1,3 +1,12 @@
+0.0.3 (12.8.17)
+
+Add MacOS support.
+More robust install/uninstall scripts.
+Implement some more Blitz BASIC gaming functions notably ImagesCollide().
+Implement support for fullscreen as well as windowed graphics.
+Add caching of all graphics drawing pending Flip().
+Countless bug fixes in compiler and libraries.
+
 0.0.2 (19.1.16)
 
 Upload binary packages for version 0.0.2.

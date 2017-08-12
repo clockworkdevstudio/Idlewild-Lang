@@ -1,11 +1,10 @@
 ; Program demonstrates the use of 3D acceleration (transparency, scaling, rotation) to create a flame effect.
 
-Const GRAPHICS_WIDTH = 1024
-Const GRAPHICS_HEIGHT = 768
 Const FLAME_RADIUS = 16
 Const FLAME_CREATE_RATE = 5
 Const SPEED# = 5.0
-Const MAX_NUM_FLAMES = 5000
+Const MAX_NUM_FLAMES = 250
+Const WINDOWED = False
 
 Global NUM_FLAMES = 0
 Global TIMER,PINGS,i
@@ -22,11 +21,15 @@ End Type
 
 SeedRnd Millisecs()
 
-Graphics GRAPHICS_WIDTH, GRAPHICS_HEIGHT
+;Graphics 2880, 1800,0, WINDOWED
+Graphics 1024, 768,0, WINDOWED
+
+Global GRAPHICS_WIDTH = GraphicsWidth()
+Global GRAPHICS_HEIGHT = GraphicsHeight()
 
 SetBuffer BackBuffer()
 
-TIMER = CreateTimer(60)
+TIMER = CreateTimer(30)
 	
 While Not KeyHit(1)
 	PINGS = WaitTimer(TIMER)

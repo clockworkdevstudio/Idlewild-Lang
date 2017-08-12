@@ -34,15 +34,16 @@ import CompilerData
 
 import qualified Data.Map as Map
 
+
 declareStandardFunction :: String -> VariableType -> [Parameter] -> (String,Symbol)
 declareStandardFunction name returnType parameterList =
 
-        (name,Function ("bb_" ++ name) name returnType FUNCTION_ORIGIN_STANDARD parameterList (length parameterList) (length parameterList) 0 0 0 False Map.empty)
+        (name,Function (bbFunctionPrefix ++ name) name returnType FUNCTION_ORIGIN_STANDARD parameterList (length parameterList) (length parameterList) 0 0 0 False Map.empty)
 
 declareStandardFunctionVar :: String -> VariableType -> [Parameter] -> Int -> Int -> (String,Symbol)
 declareStandardFunctionVar name returnType parameterList maxNumArguments minNumArguments =
 
-        (name,Function ("bb_" ++ name) name returnType FUNCTION_ORIGIN_STANDARD parameterList maxNumArguments minNumArguments 0 0 0 False Map.empty)
+        (name,Function (bbFunctionPrefix ++ name) name returnType FUNCTION_ORIGIN_STANDARD parameterList maxNumArguments minNumArguments 0 0 0 False Map.empty)
 
 createRequiredParameter :: String -> VariableType -> Parameter
 createRequiredParameter name dataType =
@@ -116,12 +117,26 @@ idlewildLangStandardFunctions =
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_FLOAT],
-      
+
+      declareStandardFunction "countgfxmodes" VARIABLE_TYPE_INT
+        [],
+      declareStandardFunction "gfxmodewidth" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "gfxmodeheight" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "gfxmodedepth" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],        
       declareStandardFunctionVar "graphics" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createOptionalParameter [] VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (-1)]),
          createOptionalParameter [] VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (-1)])] 4 2,
+      declareStandardFunction "endgraphics" VARIABLE_TYPE_INT
+        [],
+      declareStandardFunction "graphicswidth" VARIABLE_TYPE_INT
+        [],   
+      declareStandardFunction "graphicsheight" VARIABLE_TYPE_INT
+        [], 
       declareStandardFunction "setbuffer" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT],
       declareStandardFunction "backbuffer" VARIABLE_TYPE_INT
@@ -139,6 +154,8 @@ idlewildLangStandardFunctions =
       declareStandardFunction "cls" VARIABLE_TYPE_INT [],
       declareStandardFunctionVar "flip" VARIABLE_TYPE_INT
         [createOptionalParameter [] VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (0)])] 1 0,
+      declareStandardFunction "screenshot" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_STRING],
       declareStandardFunction "line" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
@@ -167,6 +184,8 @@ idlewildLangStandardFunctions =
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "freeimage" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT],
       
       declareStandardFunction "maskimage" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
@@ -204,6 +223,15 @@ idlewildLangStandardFunctions =
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createOptionalParameter [] VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 0])] 8 7,
       declareStandardFunction "imagescollide" VARIABLE_TYPE_INT
+        [createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT,
+         createRequiredParameter [] VARIABLE_TYPE_INT],
+      declareStandardFunction "imagerectcollide" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
          createRequiredParameter [] VARIABLE_TYPE_INT,
@@ -258,7 +286,7 @@ idlewildLangStandardFunctions =
       declareStandardFunction "processevents" VARIABLE_TYPE_INT
         [],   
       declareStandardFunction "keydown" VARIABLE_TYPE_INT
-        [createRequiredParameter [] VARIABLE_TYPE_INT],      
+        [createRequiredParameter [] VARIABLE_TYPE_INT],
       declareStandardFunction "keyhit" VARIABLE_TYPE_INT
         [createRequiredParameter [] VARIABLE_TYPE_INT],
 

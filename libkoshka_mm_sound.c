@@ -4,13 +4,13 @@ Copyright (c) 2014-2017, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met: 
+modification, are permitted provided that the following conditions are met:
 
 1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer. 
+   list of conditions and the following disclaimer.
 2. Redistributions in binary form must reproduce the above copyright notice,
    this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution. 
+   and/or other materials provided with the distribution.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -43,7 +43,7 @@ unsigned long long int bb_loadsound(char *name)
     Sound *sound;
     sample = (Mix_Chunk*)Mix_LoadWAV(name);
     if(!sample)
-	return 0;
+        return 0;
     sound = (Sound*)malloc(sizeof(Sound));
     sound->pitch = 1;
     sound->volume = 0.5f;
@@ -58,6 +58,7 @@ unsigned long long int bb_loopsound(unsigned long long int sound_handle)
     Sound *sound;
     sound = (Sound*)sound_handle;
     sound->loop = -1;
+    return 0;
 }
 
 long long int bb_playsound(unsigned long long int sound_handle)
@@ -72,12 +73,13 @@ long long int bb_playsound(unsigned long long int sound_handle)
 unsigned long long int bb_stopchannel(long long int channel)
 {
     Mix_HaltChannel(channel);
+    return 0;
 }
 
 unsigned long long int bb_channelplaying(long long int channel)
 {
     if(Mix_Playing(channel))
-	return 1;
+        return 1;
     else
-	return 0;
+        return 0;
 }

@@ -4,13 +4,13 @@ Copyright (c) 2014-2017, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met: 
+modification, are permitted provided that the following conditions are met:
 
 1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer. 
+   list of conditions and the following disclaimer.
 2. Redistributions in binary form must reproduce the above copyright notice,
    this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution. 
+   and/or other materials provided with the distribution.
 
 THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
 ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
@@ -27,18 +27,33 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdio.h>
 #include <SDL2/SDL_ttf.h>
+
+#if MAC_OS==1
+
+#include <OpenGL/gl.h>
+#include <OpenGL/glu.h>
+#include <OpenGL/glext.h>
+#include <GLUT/glut.h>
+
+#else
+
 #include <GL/glew.h>
 #include <GL/glext.h>
 #include <SDL2/SDL_opengl.h>
 #include <GL/glu.h>
+
+#endif
+
 #include "libkoshka_mm.h"
+
+unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,unsigned long long int frame);
 
 extern unsigned long long int BB_COLOR_RED;
 extern unsigned long long int BB_COLOR_GREEN;
 extern unsigned long long int BB_COLOR_BLUE;
 extern unsigned long long int BB_COLOR_ALPHA;
 
-unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,long long int frame);
+unsigned long long int draw_text(unsigned long long int image_handle,long long int x,long long int y);
 
 TTF_Font *BB_CURRENT_FONT;
 
@@ -51,6 +66,7 @@ unsigned long long int bb_loadfont(char *font_name,unsigned long long int height
 unsigned long long int bb_setfont(unsigned long long int font_handle)
 {
     BB_CURRENT_FONT = (TTF_Font*)font_handle;
+    return 0;
 }
 
 unsigned long long int bb_text(long long int x,long long int y,char *text,unsigned long long int center_x,unsigned long long int center_y)
@@ -68,14 +84,14 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
     surface = TTF_RenderUTF8_Blended(BB_CURRENT_FONT,text,color);
     glGenTextures(1,&texture);
     glBindTexture(GL_TEXTURE_2D,texture);
-	
+
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
 
     glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,surface->w,surface->h,0,GL_RGBA,GL_UNSIGNED_BYTE,surface->pixels);
-	
+
     image = (Image*)malloc(sizeof(Image));
     image->textures = (GLuint*)malloc(sizeof(GLuint));
     image->textures[0] = texture;
@@ -84,32 +100,30 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
     image->height = surface->h;
     image->width_frames = 1;
     image->height_frames = 1;
+    image->masks = 0;
+    image->auto_destruct = 1;
 
     if(center_x)
     {
-	image->handle_x = image->width / 2;
+        image->handle_x = image->width / 2;
     }
     else
     {
-	image->handle_x = 0;
+        image->handle_x = 0;
     }
 
     if(center_y)
     {
-	image->handle_y = image->height / 2;
+        image->handle_y = image->height / 2;
     }
     else
     {
-	image->handle_y = 0;
+        image->handle_y = 0;
     }
 
-    bb_drawimage((unsigned long long int)image,x,y,0);
-    
-    SDL_FreeSurface(surface);
-    glDeleteTextures(1,&texture);
-    free(image->textures);
-    free(image);
-    return 0;
+    bb_drawimage((unsigned long long)image,x,y,0);
+
+    return 1;
 }
 
 unsigned long long int bb_stringwidth(char *text)

@@ -51,6 +51,8 @@ defaultOptions = Options
          optionShowVersion = False,
 #if LINUX==1
          optionOutputFileName = "a.out",
+#elif MAC_OS==1
+         optionOutputFileName = "a.out",
 #elif WINDOWS==1
          optionOutputFileName = "a.exe",
 #endif

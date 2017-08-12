@@ -1,4 +1,4 @@
-Graphics 1024,768
+Graphics 1024,768,0,0;2880,1800,0,False
 
 Const NUM_PARTICLES = 1
 Const PARTICLE_LIFESPAN = 120
@@ -15,8 +15,8 @@ Type Particle
 	Field f
 End Type
 
-Origin 512,384
-
+Origin GraphicsWidth() / 2,GraphicsHeight() / 2
+Origin 512, 384
 Timer = CreateTimer(30)
 
 While Not KeyHit(1)

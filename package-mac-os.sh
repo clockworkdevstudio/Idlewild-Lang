@@ -1,0 +1,16 @@
+#!/bin/bash
+
+rm -r "$1"
+mkdir "$1"
+cp idlewild-lang-mac-os "$1"
+cp libkoshka.core.dylib "$1"
+cp libkoshka.mm.dylib "$1"
+cp -r ../idlewild-lang-deps/* "$1"
+cp install-mac-os.sh "$1"
+cp uninstall-mac-os.sh "$1"
+mkdir "$1/Examples"
+cp -r Examples/*.bb "$1/Examples"
+cp README.md "$1"
+cp LICENSE "$1"
+#tar -czf "$1".tar.gz "$1"
+zip -r "$1".zip "$1"

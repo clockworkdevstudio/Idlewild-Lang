@@ -40,8 +40,9 @@ import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 
 import System.IO
+import System.Exit
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 import Control.Applicative (Applicative(..))
 
@@ -135,17 +136,18 @@ data CodeState =
 
 newtype CodeTransformation action =
         CodeTransformation
-        {runCodeTransformation :: ErrorT FatalError (StateT CodeState IO) action}
+        {runCodeTransformation :: ExceptT FatalError (StateT CodeState IO) action}
         deriving (Monad, MonadIO, MonadError FatalError, MonadState CodeState)
 
 codeTransformation :: CodeState -> CodeTransformation () -> IO (Either FatalError (), CodeState)
-codeTransformation codeState action = (runStateT (runErrorT (runCodeTransformation action))) codeState
+codeTransformation codeState action = (runStateT (runExceptT (runCodeTransformation action))) codeState
 
 transformCode :: CodeTransformation () -> CodeState -> IO CodeState
 transformCode action state =
   do (success,codeState) <- codeTransformation state action
      case success of
-          (Left fatalError) -> error (printFatalError fatalError)
+          (Left fatalError) -> do liftIO $ putStrLn (formatFatalError fatalError)
+                                  liftIO $ exitSuccess
           (Right ()) -> return codeState               
 
 verboseCommentary :: String -> Bool -> CodeTransformation ()
@@ -153,8 +155,6 @@ verboseCommentary msg verbose =
   do if verbose
      then liftIO $ putStr msg                
      else return ()
-
-instance Error FatalError
 
 data FatalError =
      FatalError
@@ -166,7 +166,7 @@ data FatalError =
       }
      deriving (Show, Eq)
 
-printFatalError :: FatalError -> String
-printFatalError (FatalError fileName line offset msg) =
+formatFatalError :: FatalError -> String
+formatFatalError (FatalError fileName line offset msg) =
     fileName ++ ":" ++ show line ++ ":" ++ show offset ++ ": " ++ msg
 

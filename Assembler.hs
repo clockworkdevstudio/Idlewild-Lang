@@ -40,7 +40,7 @@ import System.FilePath.Posix
 import Data.Maybe
 import Data.List
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 
 assemble :: CodeTransformation ()
@@ -64,24 +64,39 @@ assemble =
      
      case optionAssembler options  of
           "fasm" ->
-            do verboseCommentary ("fasm " ++ asmFileName ++ "\n") verbose
-               (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "fasm" [asmFileName] ""
+            do
+#if LINUX==1
+               let fasmPath = "/usr/bin/fasm"
+#elif MAC_OS==1
+               let fasmPath = "/usr/local/bin/fasm"
+#elif WINDOWS==1
+               let fasmPath = "C:\\\\Program Files\\Idlewild-Lang\\fasm.exe" 
+#endif
+               verboseCommentary ("fasm " ++ asmFileName ++ "\n") verbose
+               (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode fasmPath [asmFileName] ""
                case exit of
-                    (ExitFailure n) -> do error (stderr ++ "\nAssembler error (fasm, code " ++ (show n) ++ ").")
+                    (ExitFailure n) -> do liftIO $ putStrLn (stderr ++ "\nAssembler error (fasm, code " ++ (show n) ++ ").")
+                                          liftIO $ exitFailure
                     _ -> return ()
 
           "nasm" ->
 
             do 
 #if LINUX==1
-               let nasmOptions = [asmFileName, "-o", objectFileName, "-f", "elf64"]
+               let nasmPath = "/usr/bin/nasm"
+                   nasmOptions = [asmFileName, "-o", objectFileName, "-f", "elf64"]
+#elif MAC_OS==1
+               let nasmPath = "/usr/local/bin/nasm"
+                   nasmOptions = [asmFileName, "-o", objectFileName, "-f", "macho64"]
 #elif WINDOWS==1
-               let nasmOptions = [asmFileName, "-o", objectFileName, "-f", "win64"]
+               let nasmPath = "C:\\Program Files\\Idlewild-Lang\\nasm.exe"
+                   nasmOptions = [asmFileName, "-o", objectFileName, "-f", "win64"]
 #endif
                verboseCommentary ("nasm " ++ (concat (intersperse " " nasmOptions)) ++ "\n") verbose
-               (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "nasm" nasmOptions ""
+               (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode nasmPath nasmOptions ""
                case exit of
-                    (ExitFailure n) -> do error (stderr ++ "\nAssembler error (nasm, code " ++ (show n) ++ ").")
+                    (ExitFailure n) -> do liftIO $ putStrLn (stderr ++ "\nAssembler error (nasm, code " ++ (show n) ++ ").")
+                                          liftIO $ exitFailure
                     _ -> return ()
           
      put LinkState {linkStateConfig = config}

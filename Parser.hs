@@ -1,3 +1,4 @@
+
 {--
 
 Copyright (c) 2014-2017, Clockwork Dev Studio
@@ -39,7 +40,7 @@ import Options
 
 import System.IO
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 import Control.Monad.Trans.Maybe
 import Debug.Trace
@@ -296,6 +297,8 @@ parseIf =
                     do token <- popToken
                        let destinationStatement = (createStatement STATEMENT_LABEL token [IdentifierExpression (tokenValue token)])
                        return (createStatement STATEMENT_IF initToken [predicateStatement,destinationStatement])
+
+                  _ -> do throwParseError "Expecting 'Then' or 'Goto'." bridgeToken
 
 parseElseIfStatements :: [Statement] -> CodeTransformation [Statement]
 parseElseIfStatements elseIfStatements =
@@ -613,16 +616,29 @@ parseTopLevelExpression =
                      return (createStatement STATEMENT_EXPRESSION initToken [createStatement EXPRESSION_ASSIGN initToken  [l,r]])
                 TOKEN_LEFT_PARENTHESIS ->
                   do f <- ambiguousArgumentList initToken l
+                     --trace (show f) (return ())
+                     --trace ("\n\n\n") (return ())
                      t1 <- lookToken
-                     if tokenID t1 == TOKEN_EQUAL_TO
-                     then do dropToken
-                             k <- expression 0 []
-                             let a = (createStatement EXPRESSION_ASSIGN initToken [f,k])
-                                 b = (createStatement STATEMENT_EXPRESSION initToken [a])
-                             return b
-                     else do r <- expressionLoop 0 f []
-                             let b = (createStatement STATEMENT_EXPRESSION initToken [r])
-                             return b
+                     case tokenID t1 of
+                       TOKEN_EQUAL_TO ->
+                         do dropToken
+                            k <- expression 0 []
+                            let a = (createStatement EXPRESSION_ASSIGN initToken [f,k])
+                                b = (createStatement STATEMENT_EXPRESSION initToken [a])
+                            return b
+                       TOKEN_FIELD_ACCESS ->
+                         do dropToken
+                            m <- expression 0 [TOKEN_EQUAL_TO]
+                            dropToken
+                            k <- expression 0 []
+                            let a = (createStatement EXPRESSION_FIELD_ACCESS initToken [f,m])
+                                b = (createStatement EXPRESSION_ASSIGN initToken [a,k])
+                                c = (createStatement STATEMENT_EXPRESSION initToken [b])
+                            return c
+                       _ -> do r <- expressionLoop 0 f []
+                               --trace (show r) (return ())
+                               let b = (createStatement STATEMENT_EXPRESSION initToken [r])
+                               return b
                 _ -> if statementID l `elem` standaloneExpressionTypes
                      then return (createStatement STATEMENT_EXPRESSION initToken [l])
                      else if statementID l == EXPRESSION_IDENTIFIER || statementID l == STATEMENT_END

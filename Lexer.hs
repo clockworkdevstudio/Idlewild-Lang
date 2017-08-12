@@ -35,7 +35,7 @@ import Common
 import Options
 
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 
 import System.IO
@@ -575,7 +575,7 @@ consume consumeFunction successState failureState errorMessage newTokenID =
                            lexStateCharacters = l}
                            
                  else if failureState == LEX_ERROR
-                      then do throwLexError errorMessage line offset -- (FatalError line offset errorMessage)
+                      then do throwLexError errorMessage line offset
                       else put state {lexStateID = failureState}
 
 throwLexError :: String -> Int -> Int -> CodeTransformation ()

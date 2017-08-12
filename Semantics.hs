@@ -49,7 +49,7 @@ import Debug.Trace
 
 import System.IO
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 
 import qualified Data.Sequence as Seq
@@ -115,8 +115,8 @@ semantics =
      markStandardFunctionAsUsed "duplicate_string"
      markStandardFunctionAsUsed "concatenate_strings"
      markStandardFunctionAsUsed "compare_strings"
-     markStandardFunctionAsUsed "free_string"
-     markStandardFunctionAsUsed "free_strings"
+     --markStandardFunctionAsUsed "free_string"
+     --markStandardFunctionAsUsed "free_strings"
 
      includeFileNameStack <- gets semanticStateIncludeFileNameStack
      program <- gets semanticStateProgram
@@ -653,8 +653,6 @@ identifierExpressionSemantics (Statement {statementID = EXPRESSION_IDENTIFIER,
                Function {functionName = sourceName} -> 
                   
                   throwSemanticError ("Illegal use of function name '" ++ sourceName ++ "'.") statement
-                        
-               k -> error "1"
 
 negExpressionSemantics (Statement {statementID = EXPRESSION_NEG,
                                 statementContents = (negate:_)}) =
@@ -910,7 +908,7 @@ genericExpressionSemantics expression
 
            do throwSemanticError ("Intrinsic type variable '" ++ name ++ "' incorrectly treated as function/array.") identifier
 
-  | otherwise = error (show expression)
+  | otherwise = throwSemanticError ("Unrecognised expression '" ++ (show expression) ++ "'.") expression
 
 functionCallIsNotTypeSafe :: [VariableType] -> [VariableType] -> Bool
 functionCallIsNotTypeSafe originalTypes newTypes =
@@ -1248,7 +1246,7 @@ collectFunctionSymbols (Statement {statementContents = statements}) =
            else return ()
 
            let combinedArguments = zip (map (extractParameter symbols) parameters) parameters
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
                registerArguments = extractRegisterArguments combinedArguments 0 0 0
                stackArguments = extractStackArguments combinedArguments 0 0 0
 #elif WINDOWS==1
@@ -1346,7 +1344,7 @@ constDeclarationSemantics Statement {statementContents = (expression:_)} =
              then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") expression
              else return ()
              
-             let value = ConstValue (reduceConstantExpression rightOperand symbols Map.empty)
+             let value = ConstValue (reductionTypeFilter (reduceConstantExpression rightOperand symbols Map.empty) (readVariableType sourceName) (getExpressionType rightOperand symbols Map.empty Map.empty)) 
 
              addConst (Const {constName = sourceName,
                        constType = (readVariableType sourceName),
@@ -1404,7 +1402,6 @@ globalVariableDeclarationSemantics Statement {statementContents = (expression:_)
                                         variableType = (readVariableType sourceName),
                                         variableIsGlobal = True})
 
-            k -> error "3"
      else throwSemanticError ("Attempt to declare a global variable in a local namespace.") expression
 
 localSemantics :: Statement -> CodeTransformation ()
@@ -1457,7 +1454,6 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
                                         variableType = (readVariableType sourceName),
                                         variableIsGlobal = False})
 
-            k -> error "4"
      else case statementID expression of
             EXPRESSION_IDENTIFIER ->
               do let sourceName = identifierExpressionValue ((head . statementContents) expression)
@@ -1504,7 +1500,6 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
                                             localAutomaticVariableType = (readVariableType sourceName),
                                             localAutomaticVariableIsArgument = False,
                                             localAutomaticVariableAddress = offset})
-            k -> error "5"
 
 functionReturnSemantics :: Statement -> CodeTransformation ()
 functionReturnSemantics (Statement {statementContents = (expression:_)}) =
@@ -1525,7 +1520,7 @@ functionReturnSemantics (Statement {statementContents = (expression:_)}) =
 functionReturnSemantics _ =
   do return ()
 
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
 extractRegisterArguments :: [(Parameter, Statement)] -> Int -> Int -> Int -> [(Parameter, Statement)]
 extractRegisterArguments arguments index numGPRArgumentsTaken numMMRArgumentsTaken
 
@@ -1543,8 +1538,6 @@ extractRegisterArguments arguments index numGPRArgumentsTaken numMMRArgumentsTak
                 then extractRegisterArguments arguments (index + 1) numGPRArgumentsTaken (numMMRArgumentsTaken + 1)
                 else extractRegisterArguments modifiedArguments index numGPRArgumentsTaken numMMRArgumentsTaken
 
-        | True = error (show arguments)
-
         where destType argument = parameterType (fst argument)
               splitArguments = splitAt (index + 1) arguments
               modifiedArguments = (take ((length (fst splitArguments)) - 1) (fst splitArguments)) ++ snd splitArguments
@@ -1561,7 +1554,7 @@ isRawRegisterStatement statement =
        RawRegister {} -> True
        _ -> False
 
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
 extractStackArguments :: [(Parameter, Statement)] -> Int -> Int -> Int -> [(Parameter, Statement)]
 extractStackArguments arguments index numGPRArgumentsDropped numMMRArgumentsDropped
 
@@ -1577,8 +1570,7 @@ extractStackArguments arguments index numGPRArgumentsDropped numMMRArgumentsDrop
 
                 if numMMRArgumentsDropped < numFunctionCallMMRs
                 then extractStackArguments modifiedArguments index numGPRArgumentsDropped (numMMRArgumentsDropped + 1)
-                else extractStackArguments arguments (index + 1) numGPRArgumentsDropped numMMRArgumentsDropped
-        | True = error (show arguments)
+                else extractStackArguments arguments (index + 1) numGPRArgumentsDropped numMMRArgumentsDropped    
 
         where destType argument = parameterType (fst argument)
               splitArguments = splitAt (index + 1) arguments
@@ -1838,8 +1830,6 @@ getIdentifierValue (Statement {statementID = STATEMENT_EXPRESSION,
                                statementContents = (identifier:_)}) =
         identifierExpressionValue (getInitialStatement identifier)
 
-getIdentifierValue k = error "6"
-
 getIntConstantValue :: Statement -> Int
 getIntConstantValue (Statement {statementID = EXPRESSION_INT_CONSTANT, 
                                 statementContents = (IntConstantExpression value:_)}) =
@@ -1848,7 +1838,7 @@ getIntConstantValue (Statement {statementID = EXPRESSION_INT_CONSTANT,
 getIntConstantValue (Statement {statementID = STATEMENT_EXPRESSION,
                                 statementContents = (intConstant:_)}) =
         intConstantExpressionValue (getInitialStatement intConstant)
-getIntConstantValue k = error (show k)
+
 getFloatConstantValue :: Statement -> Double
 getFloatConstantValue (Statement {statementID = EXPRESSION_FLOAT_CONSTANT, 
                                   statementContents = (FloatConstantExpression value:_)}) =
@@ -2088,8 +2078,6 @@ reductionTypeFilter statement destType sourceType
                         Statement EXPRESSION_STRING_CONSTANT lineNumber offset [StringConstantExpression ("\"" ++ (show (getFloatConstantValue statement)) ++ "\"")]
                (VARIABLE_TYPE_CUSTOM {}, VARIABLE_TYPE_CUSTOM {}) ->
                         Statement EXPRESSION_INT_CONSTANT lineNumber offset [IntConstantExpression 1]
-
-               (k,l) -> error "7"
                         
           where types = (destType, sourceType)
                 lineNumber = statementLineNumber statement
@@ -2220,7 +2208,7 @@ getExpressionType expression symbols localSymbols types
                dataType
              (Function {functionType = dataType}) ->
                dataType
-             k -> error (show k)
+             
   | statementID expression `elem` [EXPRESSION_INT_CONSTANT,EXPRESSION_HEX_CONSTANT,EXPRESSION_BIN_CONSTANT] =
       VARIABLE_TYPE_INT
   | statementID expression `elem` [EXPRESSION_FLOAT_CONSTANT,EXPRESSION_PI] =

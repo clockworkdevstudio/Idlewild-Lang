@@ -42,7 +42,7 @@ import System.FilePath.Posix
 import System.Directory
 
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 
 import Debug.Trace
@@ -61,13 +61,27 @@ link =
      verboseCommentary ("Linking...\n") verbose
      
 #if LINUX==1
+  
      let standardLibraryNames =
            if console
            then ["koshka.core"]
            else ["koshka.core","koshka.mm"]
          outputFileName = rawOutputFileName
 
-         gccOptions = [objectFileName, "-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+         gccOptions = [objectFileName,"-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+     verboseCommentary ("gcc " ++ (concat (intersperse " " gccOptions)) ++ "\n") verbose
+     
+     (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "gcc" gccOptions ""
+
+#elif MAC_OS==1
+
+     let standardLibraryNames =
+           if console
+           then ["koshka.core"]
+           else ["koshka.core","koshka.mm"]
+         outputFileName = rawOutputFileName
+
+         gccOptions = ["-o",rawOutputFileName,objectFileName,"-L",".","-L","/usr/local/lib/","-lc", "-lm"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
      verboseCommentary ("gcc " ++ (concat (intersperse " " gccOptions)) ++ "\n") verbose
      
      (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "gcc" gccOptions ""
@@ -95,6 +109,7 @@ link =
           (ExitFailure n) -> do liftIO $ do k <- getCurrentDirectory
                                             putStrLn (show k)
                                 liftIO $ putStr stdout
-                                error (stderr ++ "\nLink error (code " ++ (show n) ++ ").")
+                                liftIO $ putStrLn (stderr ++ "\nLink error (code " ++ (show n) ++ ").")
+                                liftIO $ exitFailure
           _ -> do liftIO $ putStr stdout
                   verboseCommentary ("Successful. Output file: '" ++ outputFileName ++ "'.\n") verbose

@@ -25,6 +25,8 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 --}
 
+{-# LANGUAGE CPP #-}
+
 module SemanticsData where
 
 import ParserData
@@ -132,4 +134,20 @@ type SymbolTable = Map.Map String Symbol
 type StringTable = Map.Map String Int
 type IntConstantTable = Map.Map Int Int
 type FloatConstantTable = Map.Map Double Int
+
+osFunctionPrefix :: String
+#if MAC_OS==1
+osFunctionPrefix = "_"
+#else
+osFunctionPrefix = ""
+#endif
+
+bbFunctionPrefix :: String
+#if MAC_OS==1
+bbFunctionPrefix = "_bb_"
+#else
+bbFunctionPrefix = "bb_"
+#endif
+
+
 

@@ -38,12 +38,12 @@ import Data.Char
 
 import System.FilePath.Posix
 import System.Directory
-
 import System.IO
 import Control.Exception
+import System.Exit
 
 import Control.Monad.State
-import Control.Monad.Error
+import Control.Monad.Except
 import Control.Monad.Identity
 import Debug.Trace
 
@@ -105,16 +105,18 @@ processArguments =
      (options, nonOptions) <- liftIO $ processOptions customisedOptions arguments
 
      if optionShowVersion options == True || optionVerbose options
-     then do liftIO $ putStrLn "Idlewild-Lang version 0.0.2."
+     then do liftIO $ putStrLn "Idlewild-Lang version 0.0.3."
+             liftIO $ exitSuccess
      else return ()
 
      if length nonOptions /= 1
-     then error "Please specify one (and only one) source file name."
+     then do liftIO $ putStrLn "Please specify one (and only one) source file name."
+             liftIO $ exitSuccess
      else return ()
 
      let sourceFileName = head nonOptions
          asmFileName = replaceExtension sourceFileName ".asm"
-#if LINUX==1
+#if LINUX==1 || MAC_OS==1
          objectFileName = replaceExtension sourceFileName ".o"
 #elif WINDOWS==1
          objectFileName = replaceExtension sourceFileName ".obj"

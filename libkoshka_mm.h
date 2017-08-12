@@ -9,6 +9,7 @@ typedef struct
     unsigned long long int **masks;
     unsigned long long int mask_width;
     unsigned long long int mask_height;
+    int auto_destruct;
 } Image;
 
 void bb_fatal_error(char *msg);
