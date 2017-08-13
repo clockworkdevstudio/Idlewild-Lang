@@ -104,7 +104,7 @@ processArguments =
      arguments <- gets argumentStateArguments
      (options, nonOptions) <- liftIO $ processOptions customisedOptions arguments
 
-     if optionShowVersion options == True || optionVerbose options
+     if optionShowVersion options == True -- || optionVerbose options
      then do liftIO $ putStrLn "Idlewild-Lang version 0.0.3."
              liftIO $ exitSuccess
      else return ()
