@@ -743,7 +743,6 @@ long long int bb_len(char *string)
             c++;
 
         }
-        [s release];
         return c;
     }
 }
@@ -793,8 +792,6 @@ long long int bb_mid(char *string,long long int offset,long long int num_charact
         UTF8 = (char*)[substring UTF8String];
         result = malloc(strlen(UTF8) + 1);
         strcpy(result,UTF8);
-        [s release];
-        [substring release];
         return (long long int)result;
     }
 }
@@ -830,8 +827,6 @@ char *bb_left(char *string,long long int num_characters)
         UTF8 = (char*)[substring UTF8String];
         result = malloc(strlen(UTF8) + 1);
         strcpy(result,UTF8);
-        [s release];
-        [substring release];
         return result;
     }
 }
@@ -879,8 +874,6 @@ long long int bb_right(char *string,long long int num_characters)
         UTF8 = (char*)[substring UTF8String];
         result = malloc(strlen(UTF8) + 1);
         strcpy(result,UTF8);
-        [s release];
-        [substring release];
         return (long long int)result;
     }
 }
@@ -916,7 +909,6 @@ char *bb_chr(unsigned long long int value)
         size = strlen(utf8_string) + 1;
         result = malloc(size);
         strcpy(result,utf8_string);
-        [apple_utf16_string release];
         return (char*)result;
     }
 }
@@ -940,7 +932,6 @@ unsigned long long int bb_uni(char *string)
         {
             result = [s characterAtIndex:0];
         }
-        [s release];
         return result;
     }
 }
@@ -956,7 +947,6 @@ char *bb_upper(char *string)
         utf8_string = (char*)[u UTF8String];
         result = malloc(strlen(utf8_string) + 1);
         strcpy(result,utf8_string);
-        [s release];
         return result;
 
     }
@@ -973,7 +963,6 @@ char *bb_lower(char *string)
         utf8_string = (char*)[u UTF8String];
         result = malloc(strlen(utf8_string) + 1);
         strcpy(result,utf8_string);
-        [s release];
         return result;
 
     }

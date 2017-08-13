@@ -93,7 +93,7 @@ libkoshka.core.dylib: libkoshka_core_mac_os.o it_quacks_like_glib.o
 	gcc -shared -o libkoshka.core.dylib libkoshka_core_mac_os.o it_quacks_like_glib.o -framework Foundation -lm ${GCC_MAC_OS_FLAGS}
 
 libkoshka_core_mac_os.o: libkoshka_core.c
-	gcc -ObjC -c libkoshka_core.c -DMAC_OS=1 -o libkoshka_core_mac_os.o -fpic ${GCC_MAC_OS_FLAGS}
+	gcc -ObjC -fobjc-arc -c libkoshka_core.c -DMAC_OS=1 -o libkoshka_core_mac_os.o -fpic ${GCC_MAC_OS_FLAGS}
 
 libkoshka.mm.dylib: libkoshka_mm_mac_os.o libkoshka_core_mac_os.o libkoshka_mm_mac_os.o libkoshka_mm_graphics_mac_os.o libkoshka_mm_sound_mac_os.o libkoshka_mm_io_mac_os.o libkoshka_mm_text_mac_os.o it_quacks_like_glib.o libkoshka.core.dylib libkoshka.core.dylib
 	gcc -shared -o libkoshka.mm.dylib libkoshka_mm_mac_os.o libkoshka_mm_graphics_mac_os.o libkoshka_mm_sound_mac_os.o libkoshka_mm_io_mac_os.o libkoshka_mm_text_mac_os.o it_quacks_like_glib.o -L. -L ../idlewild-lang-deps -lkoshka.core -lstdc++ -framework OpenGL -framework Cocoa -framework SDL2 -framework SDL2_image -framework SDL2_mixer -framework SDL2_ttf -F/Library/Frameworks -lm ${GCC_MAC_OS_FLAGS}
