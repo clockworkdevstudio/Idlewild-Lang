@@ -1777,14 +1777,14 @@ compileMultiFunction  (Statement {statementContents = statements}) =
 
            if (functionNumLocals function - functionNumRegisterArguments function) > 0
            then {-- This code is more efficient but triggers a crash in the valgrind memory error checker... --}
-                 putAsm
+                {-- putAsm
                   ["lea rdi, [rbp - " ++ show (8 * (length registerArguments + numPreservedRegisters)) ++ "]\n",
                    "mov rcx, " ++ show (functionNumLocals function - functionNumRegisterArguments function) ++ "\n",
                    "xor rax, rax\n",
                    "std\n",
                    "repnz stosq\n",
-                   "cld\n"]
-                {--
+                   "cld\n"] --}
+                
                 putAsm
                   ["lea rdi, [rbp - " ++ show (8 * (length registerArguments + numPreservedRegisters)) ++ "]\n",
                    "mov rcx, " ++ show (functionNumLocals function - functionNumRegisterArguments function) ++ "\n",
@@ -4705,7 +4705,7 @@ isLeakyExpression symbols localSymbols types nameSpace expression
              case f of
                   Function {} -> functionType f == VARIABLE_TYPE_STRING
                   _ -> False
-  | statementID expression == EXPRESSION_STR = False
+  | statementID expression == EXPRESSION_STR = True
   | statementID expression == EXPRESSION_GROUP =
     isLeakyExpression symbols localSymbols types nameSpace (getInitialStatement expression)
   | otherwise =

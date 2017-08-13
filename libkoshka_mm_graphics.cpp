@@ -529,6 +529,8 @@ extern "C"
                 free(image->masks[i]);
             glDeleteTextures(1,&(image->textures[i]));
         }
+        free(image->textures);
+        free(image);
 
         return 1;
 
