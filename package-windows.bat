@@ -11,6 +11,8 @@ copy FASM.EXE %1
 copy nasm.exe %1
 copy install-windows.bat %1
 copy uninstall-windows.bat %1
+copy README.md %1
+copy CHANGES %1
 copy LICENSE* %1
 copy GoLink.exe %1
 xcopy Examples %1\Examples /E
