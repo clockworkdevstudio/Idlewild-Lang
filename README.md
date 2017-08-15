@@ -37,6 +37,7 @@ INSTALL FROM BINARY PACKAGE (MACOS)
 Run the following commands:
 
 `sudo chmod +x ./install-mac-os.sh`
+
 `sudo ./install-mac-os.sh`
 
 INSTALL FROM BINARY PACKAGE (UBUNTU)
@@ -44,7 +45,9 @@ INSTALL FROM BINARY PACKAGE (UBUNTU)
 Run the following commands:
 
 `sudo apt-get install libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-mixer-2.0-0`
+
 `chmod +x ./install-linux.sh`
+
 `sudo ./install-linux.sh`
 
 INSTALL FROM BINARY PACKAGE (WINDOWS)
@@ -58,7 +61,9 @@ INSTALL FROM SOURCE (MACOS)
 You will need the Glasgow Haskell Compiler (GHC), the Monad Transformer Library (obtainable via Cabal), and XCode, including the command line tools. You should put the header files for SDL2 and glm in /usr/local/include
 
 `make mac-os-release`
+
 `chmod +x ./install-mac-os.sh`
+
 `sudo ./install-mac-os.sh`
 
 INSTALL FROM SOURCE (LINUX)
@@ -66,8 +71,11 @@ INSTALL FROM SOURCE (LINUX)
 To compile and install the language on a (RECENT!) Ubuntu host:
 
 `sudo apt-get install ghc libghc-mtl-dev libglib2.0-dev libgtk-3-dev libsdl2-dev libsdl2-image-2.0-0 libsdl2-image-dev libsdl2-ttf-2.0-0 libsdl2-ttf-dev libsdl2-mixer-2.0-0 libsdl2-mixer-dev freeglut3-dev pkg-config libglew-dev libglm-dev`
+
 `make linux-release`
+
 `chmod +x ./install-linux.sh`
+
 `sudo ./install-linux.sh`
 
 INSTALL FROM SOURCE (WINDOWS)
@@ -102,6 +110,7 @@ These should go in C:\Windows\System32.
 In addition, you'll need all the corresponding C header files, the Glasgow Haskell Compiler, Git BASH, and MSYS2. You'll also need an assembler (NASM or FASM) reachable from within your PATH environment variable, as well as the linker GoLink.exe. Then you need to issue the command:
 
 `make windows-release`
+
 `install-windows.bat`
 
 (from an admin shell.)
