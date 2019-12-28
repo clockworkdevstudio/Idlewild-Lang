@@ -88,7 +88,7 @@ options =
                    "Assembler backend (default: nasm [unless otherwise specified in ~/.idlewild-lang.conf]).",
          Option ['d'] ["debug"]
                   (NoArg (\ opts -> opts { optionDebug = True }))
-                  "Compile executable in debug mode for diagnostic messages.",
+                  "Include DWARF debugging information and diagnostic messages.",
          Option ['a'] ["abstract"]
                   (NoArg (\ opts -> opts { optionAbstractSyntaxTree = True }))
                   "Show abstract syntax tree.",

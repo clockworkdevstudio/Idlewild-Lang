@@ -42,6 +42,8 @@ import Semantics
 import Common
 import Options
 
+import DWARF
+
 import System.IO
 import Control.Monad.State
 import Control.Monad.Except
@@ -97,12 +99,15 @@ compile =
            putAsmFileInfo
            putDirectivesAndFunctionDeclarations
            putGlobalData
-
+           
+           {--
            b <- getAsmBucket
            setAsmBucket data_
            putAsm
-             ["BASIC_DATA:\n\n"]
+             ["SECTION .data\nBASIC_DATA:\n\n"]
+           putDataSentinel
            setAsmBucket b
+           --}
            
            putAuxiliaryCode
            
@@ -111,11 +116,13 @@ compile =
            putInts
            putFloats
            putStrings
-           putDataSentinel
            putEachTypeStringOffsets
            putCleanup
            putEndFunction
-
+           
+           putDebugInfo
+           putDWARFAbbreviations
+           
            asm <- gets compileStateAsm
            config <- gets compileStateConfig
            
@@ -205,13 +212,13 @@ putStandardLibraryInit =
        ["push rax\n",
         "mov rcx, 2\n",
         "mov rax, 0\n",
-        "call dpiHack\n",
+        "call [dpiHack wrt ..got]\n",
         "pop rax\n"]
 #else
      putAsm
        ["push rax\n",
         "mov rax, 0\n",
-        "call " ++ osFunctionPrefix ++ "dpiHack\n",
+        "call [" ++ osFunctionPrefix ++ "dpiHack wrt ..got]\n",
         "pop rax\n"]
 #endif
 
@@ -1372,14 +1379,14 @@ compileStringCaseStatements prevCPUContext selectRegister escapeLabelID (stateme
                ["mov rdi, " ++ registerName selectRegister ++ "\n",
                 "mov rsi, " ++ registerName caseRegister ++ "\n",
                 "mov rax, 0\n",
-                "call " ++ bbFunctionPrefix ++ "compare_strings\n"]
+                "call [" ++ bbFunctionPrefix ++ "compare_strings wrt ..got]\n"]
         putStringFree caseRegister =
           do putAsm
                ["push rax\n",
                 "push rax\n",
                 "mov rdi, " ++ registerName caseRegister ++ "\n",
                 "mov rax, 0\n",
-                "call " ++ bbFunctionPrefix ++ "free_string\n",
+                "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n",
                 "pop rax\n",
                 "pop rax\n"]
 
@@ -1440,7 +1447,7 @@ compileStringCaseStatements prevCPUContext selectRegister escapeLabelID (stateme
                 "mov rdx, " ++ registerName caseRegister ++ "\n",
                 "mov rax, 0\n",
                 "sub rsp, 32\n",
-                "call " ++ bbFunctionPrefix ++ "compare_strings\n",
+                "call [" ++ bbFunctionPrefix ++ "compare_strings wrt ..got]\n",
                 "add rsp, 32\n"]
         putStringFree caseRegister =
           do putAsm
@@ -1449,7 +1456,7 @@ compileStringCaseStatements prevCPUContext selectRegister escapeLabelID (stateme
                 "mov rcx, " ++ registerName caseRegister ++ "\n",
                 "mov rax, 0\n",
                 "sub rsp, 32\n",
-                "call " ++ bbFunctionPrefix ++ "free_string\n",
+                "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n",
                 "add rsp, 32\n",
                 "pop rax\n",
                 "pop rax\n"]
@@ -1693,7 +1700,7 @@ compileMultiFunction  (Statement {statementContents = statements}) =
                  do putAsm
                       ["mov rax, 0\n",
                        "mov rdi, [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "]\n",
-                       "call " ++ bbFunctionPrefix ++ "free_string\n"]
+                       "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n"]
 
                insertArgumentSpill ((parameter, _) : rest) index intIndex floatIndex =
                     
@@ -1737,7 +1744,7 @@ compileMultiFunction  (Statement {statementContents = statements}) =
                                 ["mov rax, 0\n",
                                  "mov rdi, [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "]\n",
                                  "sub rsp, 8\n",
-                                 "call " ++ bbFunctionPrefix ++ "duplicate_string\n",
+                                 "call [" ++ bbFunctionPrefix ++ "duplicate_string wrt ..got]\n",
                                  "add rsp, 8\n",
                                  "mov [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "], rax\n"]
 
@@ -2005,7 +2012,7 @@ compileMultiFunction  (Statement {statementContents = statements}) =
                       ["mov rax, 0\n",
                        "mov rcx, [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "]\n",
                        "sub rsp, 32\n",
-                       "call " ++ bbFunctionPrefix ++ "free_string\n",
+                       "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n",
                        "add rsp, 32\n"]
                       
                insertArgumentSpill ((parameter, _) : rest) index intIndex floatIndex =
@@ -2050,7 +2057,7 @@ compileMultiFunction  (Statement {statementContents = statements}) =
                                 ["mov rax, 0\n",
                                  "mov rcx, [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "]\n",
                                  "sub rsp, 40\n",
-                                 "call " ++ bbFunctionPrefix ++ "duplicate_string\n",
+                                 "call [" ++ bbFunctionPrefix ++ "duplicate_string wrt ..got]\n",
                                  "add rsp, 40\n",
                                  "mov [rbp + " ++ show (localAutomaticVariableAddress symbol) ++ "], rax\n"]
 
@@ -2333,7 +2340,7 @@ putEndFunction =
         "call " ++ osFunctionPrefix ++ "main.cleanup\n",
         "mov rax, 0\n",
         "mov rdi, [rsp]\n",
-        "call " ++ osFunctionPrefix ++ "exit\n"]
+        "call [" ++ osFunctionPrefix ++ "exit wrt ..got]\n"]
 #elif WINDOWS==1
 putEndFunction :: CodeTransformation ()
 putEndFunction =
@@ -2343,7 +2350,7 @@ putEndFunction =
         "call " ++ osFunctionPrefix ++ "main.cleanup\n",
         "mov rax, 0\n",
         "mov rcx, [rsp]\n",
-        "call " ++ osFunctionPrefix ++ "exit\n"]
+        "call [" ++ osFunctionPrefix ++ "exit wrt ..got]\n"]
 #endif
 
 #if LINUX==1 || MAC_OS==1
@@ -3951,11 +3958,15 @@ putDirectivesAndFunctionDeclarations =
            putExternalFunctionDeclarations symbols =
 
              do putAsmGeneric
-                  ["extrn " ++ osFunctionPrefix ++ "exit\n",
+                  ["extrn " ++ osFunctionPrefix ++ "bb_init_string\n",
+                   "extrn " ++ osFunctionPrefix ++ "bb_free_string\n",
+                   "extrn " ++ osFunctionPrefix ++ "exit\n",
                    "extrn " ++ osFunctionPrefix ++ "strlen\n",
                    "extrn " ++ osFunctionPrefix ++ "free\n",
                    "extrn " ++ osFunctionPrefix ++ "dpiHack\n"]
-                  ["extern " ++ osFunctionPrefix ++ "exit\n",
+                  ["extern " ++ osFunctionPrefix ++ "bb_init_string\n",
+                   "extern " ++ osFunctionPrefix ++ "bb_free_string\n",
+                   "extern " ++ osFunctionPrefix ++ "exit\n",
                    "extern " ++ osFunctionPrefix ++ "strlen\n",
                    "extern " ++ osFunctionPrefix ++ "free\n",
                    "extern " ++ osFunctionPrefix ++ "dpiHack\n"]
@@ -4107,7 +4118,7 @@ putAuxiliaryCode :: CodeTransformation ()
 putAuxiliaryCode =
   do bucket <- getAsmBucket
      setAsmBucket functions_
-     putAsm
+     {--putAsm
        ["" ++ bbFunctionPrefix ++ "init_string:\n\n",
         "push rbp\n",
         "mov rax, NULL_STRING\n",
@@ -4128,14 +4139,14 @@ putAuxiliaryCode =
         "cmp rbx, 0\n",
         "jz .null_or_empty_string\n",
         "sub rsp, 8\n",
-        "call " ++ osFunctionPrefix ++ "strlen\n",
+        "call [" ++ osFunctionPrefix ++ "strlen wrt ..got]\n",
         "add rsp, 8\n",
         "cmp rax, 0\n",
         "jle .null_or_empty_string\n",
         "mov rdi, rbx\n",
         "mov rax, 0\n",
         "sub rsp, 8\n",
-        "call " ++ osFunctionPrefix ++ "free\n",
+        "call [" ++ osFunctionPrefix ++ "free wrt ..got]\n",
         "add rsp, 8\n",
         ".null_or_empty_string:\n",
         "pop r15\n",
@@ -4145,6 +4156,7 @@ putAuxiliaryCode =
         "pop rbx\n",
         "pop rbp\n",
         "ret\n\n"]
+     --}
      setAsmBucket bucket
 
 #elif WINDOWS==1
@@ -4172,14 +4184,14 @@ putAuxiliaryCode =
         "cmp rbx, 0\n",
         "jz .null_or_empty_string\n",
         "sub rsp, 8\n",
-        "call " ++ osFunctionPrefix ++ "strlen\n",
+        "call [" ++ osFunctionPrefix ++ "strlen wrt ..got]\n",
         "add rsp, 8\n",
         "cmp rax, 0\n",
         "jle .null_or_empty_string\n",
         "mov rcx, rbx\n",
         "mov rax, 0\n",
         "sub rsp, 8\n",
-        "call " ++ osFunctionPrefix ++ "free\n",
+        "call [" ++ osFunctionPrefix ++ "free wrt ..got]\n",
         "add rsp, 8\n",
         ".null_or_empty_string:\n",
 
@@ -4203,13 +4215,13 @@ putBasicEpilogue =
        ["call .cleanup\n",
         "mov rax, 0\n",
         "mov rdi, 0\n",
-        "call " ++ osFunctionPrefix ++ "exit\n\n"]
+        "call [" ++ osFunctionPrefix ++ "exit wrt ..got]\n\n"]
 #elif WINDOWS==1
      putAsm
        ["call .cleanup\n",
         "mov rcx, 0\n",
         "sub rsp, 32\n",
-        "call " ++ osFunctionPrefix ++ "exit\n\n"]
+        "call [" ++ osFunctionPrefix ++ "exit wrt ..got]\n\n"]
 #endif
 
 putCleanup :: CodeTransformation ()
@@ -4244,6 +4256,63 @@ externFunctionDeclaration (Function {functionName = name,functionOrigin = FUNCTI
 
 externFunctionDeclaration _ = return ()
 
+putDebugInfo :: CodeTransformation ()
+putDebugInfo =
+  do debug <- gets (optionDebug . configOptions . compileStateConfig)
+     if debug
+     then do mapM_ putSectionHeader [(debug_info_,"debug_info"),(debug_abbrev_,"debug_abbrev"),(debug_line_,"debug_line"),(debug_str_,"debug_str")]
+             --mapM_ putSectionHeader [(debug_abbrev_,"debug_abbrev")]
+     else return ()
+     where putSectionHeader (bucket,name) =
+             do prevBucket <- getAsmBucket
+                setAsmBucket bucket
+                putAsmGeneric
+                  ["section '." ++ name ++ "'\n\n"] ["SECTION ." ++ name ++ "\n\n"]
+                
+                setAsmBucket prevBucket
+              
+--putDWARFCompilationUnitHeader :: CodeTransformation ()
+--putDWARFCompilationUnitHeader =
+--  do
+
+attributeSpecToString :: DWARFAttributeSpec -> [Char]
+attributeSpecToString spec =
+  
+  show (specName spec) ++ "\n" ++ show (specForm spec)
+
+
+putDWARFAbbreviation :: DWARFAbbreviation -> CodeTransformation ()
+putDWARFAbbreviation abbreviation =
+  do if abbreviationKey abbreviation /= "NONE"
+     then do putAsm
+               ["db " ++ encodeUnsignedLEB128 (abbreviationCode abbreviation) ++ "\n",
+                "db " ++ encodeUnsignedLEB128 (abbreviationTag abbreviation) ++ " ; " ++ dwarfTagEncodingToString (abbreviationTag abbreviation) ++ "\n",
+                if abbreviationHasChildren abbreviation
+                then "db 1 ; DW_CHILDREN_yes\n"
+                else "db 0 ; DW_CHILDREN_no\n"]
+             putAsm (map attributeSpecToAsm (abbreviationSpecs abbreviation))
+             putAsm ["db 0,0\n\n"]
+     else return ()
+  where attributeSpecToAsm spec =
+          "db " ++ encodeUnsignedLEB128 (specName spec) ++ " ; " ++ dwarfAttributeNameEncodingToString (specName spec) ++ "\n" ++
+          "db " ++ encodeUnsignedLEB128 (specForm spec) ++ " ; " ++ dwarfAttributeFormEncodingToString (specForm spec) ++ "\n"
+        
+
+putDWARFAbbreviations :: CodeTransformation ()
+putDWARFAbbreviations =
+  do bucket <- getAsmBucket
+     
+     setAsmBucket debug_abbrev_
+     
+     mapM_ putDWARFAbbreviation indexedAbbreviations
+     --putDWARFAbbreviation (getDWARFAbbreviation "COMPILE_UNIT")
+     --putDWARFAbbreviation (getDWARFAbbreviation "SUBPROGRAM")
+     --putDWARFAbbreviation (getDWARFAbbreviation "BASE_TYPE")
+     
+     putAsm ["dq 0\n\n"]
+     
+     setAsmBucket bucket
+     
 linkedListDeclaration :: Symbol -> CodeTransformation ()
 linkedListDeclaration (Type {typeName = name}) =
   putAsm
@@ -4298,11 +4367,11 @@ stringFree symbols (Variable {variableName = name}) =
 #if LINUX==1 || MAC_OS==1
          else "mov rdi, [" ++ decorateVariableName name symbols Map.empty NO_NAMESPACE ++ "]\n" ++
               "mov rax, 0\n" ++
-              "call " ++ bbFunctionPrefix ++ "free_string\n\n"
+              "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n\n"
 #elif WINDOWS==1
          else "mov rcx, [" ++ decorateVariableName name symbols Map.empty NO_NAMESPACE ++ "]\n" ++
               "sub rsp, 32\n" ++
-              "call " ++ bbFunctionPrefix ++ "free_string\n" ++
+              "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n" ++
               "add rsp, 32\n\n"
 #endif
 
@@ -4315,13 +4384,13 @@ arrayFree symbols localSymbols (Array name (VARIABLE_TYPE_ARRAY targetType) dime
                         "mov rsi, " ++ bbFunctionPrefix ++ "free_string\n",
                         "mov rdx, " ++ show dimensionality ++ "\n",
                         "mov rax, 0\n",
-                        "call " ++ bbFunctionPrefix ++ "deallocate_array\n"]
+                        "call [" ++ bbFunctionPrefix ++ "deallocate_array wrt ..got]\n"]
              else putAsm
                        ["mov rdi, [" ++ decorateVariableName name symbols localSymbols NO_NAMESPACE ++ "]\n",
                         "mov rsi, 0\n",
                         "mov rdx, " ++ show dimensionality ++ "\n",
                         "mov rax, 0\n",
-                        "call " ++ bbFunctionPrefix ++ "deallocate_array\n"]
+                        "call [" ++ bbFunctionPrefix ++ "deallocate_array wrt ..got]\n"]
 #elif WINDOWS==1
 arrayFree :: SymbolTable -> SymbolTable -> Symbol -> CodeTransformation ()
 arrayFree symbols localSymbols (Array name (VARIABLE_TYPE_ARRAY targetType) dimensionality) =
@@ -4331,14 +4400,14 @@ arrayFree symbols localSymbols (Array name (VARIABLE_TYPE_ARRAY targetType) dime
                         "mov rdx, [" ++ bbFunctionPrefix ++ "free_string]\n",
                         "mov r8, " ++ show dimensionality ++ "\n",
                         "sub rsp, 32\n",
-                        "call " ++ bbFunctionPrefix ++ "deallocate_array\n",
+                        "call [" ++ bbFunctionPrefix ++ "deallocate_array wrt ..got]\n",
                         "add rsp, 32\n"]
              else putAsm
                        ["mov rcx, [" ++ decorateVariableName name symbols localSymbols NO_NAMESPACE ++ "]\n",
                         "mov rdx, 0\n",
                         "mov r8, " ++ show dimensionality ++ "\n",
                         "sub rsp, 32\n",
-                        "call " ++ bbFunctionPrefix ++ "deallocate_array\n",
+                        "call [" ++ bbFunctionPrefix ++ "deallocate_array]\n",
                         "add rsp, 32\n"]
 #endif
                         
@@ -4930,9 +4999,15 @@ insertFunctionCall sourceName arguments =
      insertRawRegisterArgumentPasses sourceRawRegisterNames destRawRegisterNames
      insertRegisterArgumentPass (reverse nonRawRegisterArguments) (reverse functionCallRegistersNonRaw)
      mapM_ (insertMMRPass multimediaRegisterNames (cpuContextOffset cpuContext + numLocals + compensation + numLeakyItems) numMMRsUsed) [0 .. numMMRsUsed - 1]
-     putAsm
-       ["mov rax, " ++ show (min numFloatArguments numFunctionCallMMRs) ++ "\n",
-        "call " ++ functionName function ++ "\n"]
+     
+     if functionOrigin function == FUNCTION_ORIGIN_USER
+     then do putAsm
+               ["mov rax, " ++ show (min numFloatArguments numFunctionCallMMRs) ++ "\n",
+                "call " ++ functionName function ++ "\n"]
+     else do putAsm
+               ["mov rax, " ++ show (min numFloatArguments numFunctionCallMMRs) ++ "\n",
+                "call [" ++ functionName function ++ " wrt ..got]\n"]
+
      if functionType function == VARIABLE_TYPE_FLOAT
      then do putAsm
                ["movq rax, xmm0\n",
@@ -4980,7 +5055,7 @@ insertFunctionCall sourceName arguments =
              do putAsm
                   ["mov rax, 0\n",
                    "mov rdi, [rbp - " ++ show (8 * (adjustment + offset)) ++ "]\n",
-                   "call " ++ bbFunctionPrefix ++ "free_string\n"]
+                   "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n"]
 #elif WINDOWS == 1
 insertFunctionCall :: String -> [Statement] -> CodeTransformation ()
 insertFunctionCall sourceName arguments =
@@ -5058,7 +5133,7 @@ insertFunctionCall sourceName arguments =
      putAsm
        ["mov rax, " ++ show (min numFloatArguments numFunctionCallMMRs) ++ "\n",
         "sub rsp, 32\n",
-        "call " ++ functionName function ++ "\n",
+        "call [" ++ functionName function ++ " wrt ..got]\n",
         "add rsp, 32\n"]
      if functionType function == VARIABLE_TYPE_FLOAT
      then do putAsm
@@ -5109,7 +5184,7 @@ insertFunctionCall sourceName arguments =
              do putAsm
                   ["mov rax, 0\n",
                    "mov rcx, [rbp - " ++ show (8 * (adjustment + offset)) ++ "]\n",
-                   "call " ++ bbFunctionPrefix ++ "free_string\n"]
+                   "call [" ++ bbFunctionPrefix ++ "free_string wrt ..got]\n"]
 #endif
 
 insertRawRegisterArgumentPasses :: [String] -> [String] -> CodeTransformation ()
@@ -5384,6 +5459,73 @@ setDataType dataType =
 getDataType :: CodeState -> VariableType
 getDataType CompileState {compileStateRegisters = CPUContext {cpuContextDataType = dataType}} =
         dataType
+
+encodeUnsignedLEB128 :: Int -> [Char]
+encodeUnsignedLEB128 integer =
+
+  if recurse integer
+  then "0x" ++ intToHexString ((extractLowOrder7Bits integer) .|. 0x80) ++ ", " ++ encodeUnsignedLEB128 (shiftRight7Bits integer)
+  else "0x" ++ intToHexString (extractLowOrder7Bits integer)
+  
+  where recurse i = shiftRight7Bits i > 0
+        extractLowOrder7Bits i = i .&. 0x7F
+        shiftRight7Bits i = shift i (-7)
+        
+        
+encodeSignedLEB128 :: Int -> [Char]
+encodeSignedLEB128 integer =
+ 
+  if recurse integer
+  then "0x" ++ intToHexString ((extractLowOrder7Bits integer) .|. 0x80) ++ ", " ++ encodeSignedLEB128 (shiftRight7Bits integer)
+  else "0x" ++ intToHexString (extractLowOrder7Bits integer)
+  
+  where recurse i = not ((shiftRight7Bits i == 0 && (encodedByte i .&. 0x40 == 0)) || (shiftRight7Bits i == (-1) && (encodedByte i .&. 0x40 == 0x40)))
+        encodedByte i = extractLowOrder7Bits i
+        extractLowOrder7Bits i = i .&. 0x7F
+        shiftRight7Bits i = shift i (-7)
+        
+intToHexString :: Int -> [Char]
+intToHexString integer =
+  if isolateRest integer /= 0
+  then  (intToHexString . shiftRight4Bits) integer ++ (nibbleToHexDigit . isolateNibble) integer
+  else (nibbleToHexDigit . isolateNibble) integer
+  where shiftRight4Bits i = uShiftR i 4
+        isolateNibble i = i .&. 0xF
+        isolateRest i = i .&. 0xFFFFFFFFFFFFFFF0
+        nibbleToHexDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+            2 -> "2"
+            3 -> "3"
+            4 -> "4"
+            5 -> "5"
+            6 -> "6"
+            7 -> "7"
+            8 -> "8"
+            9 -> "9"
+            10 -> "A"
+            11 -> "B"
+            12 -> "C"
+            13 -> "D"
+            14 -> "E"
+            15 -> "F"
+
+intToBinString :: Int -> [Char]
+intToBinString integer =
+  if isolateRest integer /= 0
+  then (intToBinString . shiftRight1Bit) integer ++ (bitToBinDigit . isolateBit) integer
+  else (bitToBinDigit . isolateBit) integer
+  where shiftRight1Bit i = uShiftR i 1
+        isolateBit i = i .&. 1
+        isolateRest i = i .&. (-2)
+        bitToBinDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+
+uShiftR :: Int -> Int -> Int
+uShiftR n k = fromIntegral (fromIntegral n `shiftR` k :: Word)
 
 compilerIncrementLineNumber :: CodeTransformation ()
 compilerIncrementLineNumber =

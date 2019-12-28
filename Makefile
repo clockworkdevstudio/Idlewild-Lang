@@ -54,7 +54,7 @@ linux: linux-release
 build-linux: idlewild-lang libkoshka.core.so libkoshka.mm.so
 
 # for profiling add: -prof -fprof-auto 
-idlewild-lang: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
+idlewild-lang: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs DWARF.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
 	ghc Main.hs -o idlewild-lang -DLINUX=1 ${GHC_LINUX_FLAGS}
 
 libkoshka.core.so: libkoshka_core.o
@@ -86,7 +86,7 @@ mac-os: mac-os-release
 build-mac-os: idlewild-lang-mac-os libkoshka.core.dylib libkoshka.mm.dylib
 
 # for profiling add: -prof -fprof-auto 
-idlewild-lang-mac-os: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
+idlewild-lang-mac-os: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs DWARF.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
 	ghc Main.hs -o idlewild-lang-mac-os -DMAC_OS=1 ${GHC_MAC_OS_FLAGS}
 
 libkoshka.core.dylib: libkoshka_core_mac_os.o it_quacks_like_glib.o
@@ -132,7 +132,7 @@ windows: windows-release
 build-windows: idlewild-lang.exe libkoshka.core.dll libkoshka.mm.dll
 
 # for profiling add: -prof -fprof-auto 
-idlewild-lang.exe: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
+idlewild-lang.exe: Main.hs Arguments.hs Assembler.hs Lexer.hs Parser.hs Semantics.hs Compiler.hs DWARF.hs Linker.hs LexerData.hs ParserData.hs SemanticsData.hs CompilerData.hs StandardFunctions.hs Options.hs Common.hs
 	ghc Main.hs -o idlewild-lang -DWINDOWS=1 ${GHC_WINDOWS_FLAGS}
 
 libkoshka.core.dll: libkoshka_core.obj

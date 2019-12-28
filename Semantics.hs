@@ -2448,7 +2448,11 @@ createAsm =
                            (globals_, createAsmBucket),
                            (code_, createAsmBucket),
                            (functions_, createAsmBucket),
-                           (data_, createAsmBucket)])
+                           (data_, createAsmBucket),
+                           (debug_info_, createAsmBucket),
+                           (debug_abbrev_, createAsmBucket),
+                           (debug_line_, createAsmBucket),
+                           (debug_str_, createAsmBucket)])
 
 createAsmBucket :: AsmBucket
 createAsmBucket = AsmBucket Seq.empty
