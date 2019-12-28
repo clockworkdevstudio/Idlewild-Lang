@@ -68,7 +68,7 @@ link =
            else ["koshka.core","koshka.mm"]
          outputFileName = rawOutputFileName
 
-         gccOptions = [objectFileName, "-T","lrs2","-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+         gccOptions = [objectFileName, "-T","/usr/bin/iwls","-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
      verboseCommentary ("gcc " ++ (concat (intersperse " " gccOptions)) ++ "\n") verbose
      
      (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "gcc" gccOptions ""
