@@ -51,6 +51,8 @@ import Control.Monad.Identity
 import Debug.Trace
 
 import Data.List
+import Data.Ord
+import Data.Word
 import Data.Char
 import Data.Bits
 import Data.Maybe
@@ -121,7 +123,6 @@ compile =
            putEndFunction
            
            putDebugInfo
-           putDWARFAbbreviations
            
            asm <- gets compileStateAsm
            config <- gets compileStateConfig
@@ -2382,7 +2383,7 @@ compileEnd _ =
         
 #elif WINDOWS==1
 compileEnd :: Statement -> CodeTransformation ()
-compileEnd (Statement {statementContents = (exitCode:_)}) =
+compileEnd (Statement {statementContents = (exitCode:g_)}) =
   do console <- gets (optionConsole . configOptions . compileStateConfig)
      let finalFunctionName =
            if console
@@ -4256,12 +4257,58 @@ externFunctionDeclaration (Function {functionName = name,functionOrigin = FUNCTI
 
 externFunctionDeclaration _ = return ()
 
+intToHexString :: Int -> [Char]
+intToHexString integer =
+  if isolateRest integer /= 0
+  then  (intToHexString . shiftRight4Bits) integer Prelude.++ (nibbleToHexDigit . isolateNibble) integer
+  else (nibbleToHexDigit . isolateNibble) integer
+  where shiftRight4Bits i = uShiftR i 4
+        isolateNibble i = i .&. 0xF
+        isolateRest i = i .&. 0xFFFFFFFFFFFFFFF0
+        nibbleToHexDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+            2 -> "2"
+            3 -> "3"
+            4 -> "4"
+            5 -> "5"
+            6 -> "6"
+            7 -> "7"
+            8 -> "8"
+            9 -> "9"
+            10 -> "A"
+            11 -> "B"
+            12 -> "C"
+            13 -> "D"
+            14 -> "E"
+            15 -> "F"
+
+intToBinString :: Int -> [Char]
+intToBinString integer =
+  if isolateRest integer /= 0
+  then (intToBinString . shiftRight1Bit) integer Prelude.++ (bitToBinDigit . isolateBit) integer
+  else (bitToBinDigit . isolateBit) integer
+  where shiftRight1Bit i = uShiftR i 1
+        isolateBit i = i .&. 1
+        isolateRest i = i .&. (-2)
+        bitToBinDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+
+
 putDebugInfo :: CodeTransformation ()
 putDebugInfo =
   do debug <- gets (optionDebug . configOptions . compileStateConfig)
      if debug
      then do mapM_ putSectionHeader [(debug_info_,"debug_info"),(debug_abbrev_,"debug_abbrev"),(debug_line_,"debug_line"),(debug_str_,"debug_str")]
-             --mapM_ putSectionHeader [(debug_abbrev_,"debug_abbrev")]
+             
+             putCompilationUnitHeader
+             putDWARFAbbreviations
+             putDWARFDIEs
+             putDWARFStrings
+             
      else return ()
      where putSectionHeader (bucket,name) =
              do prevBucket <- getAsmBucket
@@ -4280,13 +4327,36 @@ attributeSpecToString spec =
   
   show (specName spec) ++ "\n" ++ show (specForm spec)
 
+putCompilationUnitHeader :: CodeTransformation ()
+putCompilationUnitHeader =
+  do bucket <- getAsmBucket
+     dwarfDIEs <- gets (debugInfoDIEs . compileStateDebugInfo)
+     
+     let --unitLength = 7 + (foldr (\dd a -> dwarfDIEAttributesSize dd + (length (uLEB128 (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dd)))) + a) 0 dwarfDIEs)
+         unitLength = 7 + (foldr (\dd a -> dwarfDIECalculateSize dd + a) 0 dwarfDIEs)
+         s = fromJust (Map.lookup "__DIE_VARIABLE_flamingo" dwarfDIEs)
+     --liftIO $ putStrLn ("my size are " ++ show (dwarfDIEAttributesSize s))
+     setAsmBucket debug_info_
+     putAsm ["dd " ++ show unitLength ++ "\n",
+             "dw 4\n",
+             "dd 0\n",
+             "db 8\n"]
+     setAsmBucket bucket
+     
+unsignedLEB128ToString :: DWARFUnsignedLEB128 -> [Char]
+unsignedLEB128ToString i =
+  intercalate "," (map (("0x" ++) . intToHexString) (map fromIntegral (uLEB128 i)))
+
+signedLEB128ToString :: DWARFSignedLEB128 -> [Char]
+signedLEB128ToString i =
+  intercalate ", " (map (("0x" ++) . intToHexString) (map fromIntegral (sLEB128 i)))
 
 putDWARFAbbreviation :: DWARFAbbreviation -> CodeTransformation ()
 putDWARFAbbreviation abbreviation =
   do if abbreviationKey abbreviation /= "NONE"
      then do putAsm
-               ["db " ++ encodeUnsignedLEB128 (abbreviationCode abbreviation) ++ "\n",
-                "db " ++ encodeUnsignedLEB128 (abbreviationTag abbreviation) ++ " ; " ++ dwarfTagEncodingToString (abbreviationTag abbreviation) ++ "\n",
+               ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (abbreviationCode abbreviation)) ++ " ; abbreviation code\n",
+                "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (abbreviationTag abbreviation)) ++ " ; " ++ dwarfTagEncodingToString (abbreviationTag abbreviation) ++ "\n",
                 if abbreviationHasChildren abbreviation
                 then "db 1 ; DW_CHILDREN_yes\n"
                 else "db 0 ; DW_CHILDREN_no\n"]
@@ -4294,25 +4364,103 @@ putDWARFAbbreviation abbreviation =
              putAsm ["db 0,0\n\n"]
      else return ()
   where attributeSpecToAsm spec =
-          "db " ++ encodeUnsignedLEB128 (specName spec) ++ " ; " ++ dwarfAttributeNameEncodingToString (specName spec) ++ "\n" ++
-          "db " ++ encodeUnsignedLEB128 (specForm spec) ++ " ; " ++ dwarfAttributeFormEncodingToString (specForm spec) ++ "\n"
+          "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (specName spec)) ++ " ; " ++ dwarfAttributeNameEncodingToString (specName spec) ++ "\n" ++
+          "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (specForm spec)) ++ " ; " ++ dwarfAttributeFormEncodingToString (specForm spec) ++ "\n"
         
-
 putDWARFAbbreviations :: CodeTransformation ()
 putDWARFAbbreviations =
   do bucket <- getAsmBucket
      
-     setAsmBucket debug_abbrev_
-     
+     setAsmBucket debug_abbrev_  
      mapM_ putDWARFAbbreviation indexedAbbreviations
-     --putDWARFAbbreviation (getDWARFAbbreviation "COMPILE_UNIT")
-     --putDWARFAbbreviation (getDWARFAbbreviation "SUBPROGRAM")
-     --putDWARFAbbreviation (getDWARFAbbreviation "BASE_TYPE")
-     
      putAsm ["dq 0\n\n"]
      
      setAsmBucket bucket
+
+bytesToString :: [Word8] -> [Char]
+bytesToString bytes =
+  intercalate ", " (map (("0x" ++) . intToHexString) (map fromIntegral bytes))
+
+putDWARFAttribute :: DWARFAttribute -> CodeTransformation ()
+putDWARFAttribute a =
+  do let sizeDecl =
+           case dwarfAttributeSize a of
+                  1 -> "db"
+                  2 -> "dw"
+                  4 -> "dd"
+                  8 -> "dq"
+                  _ -> "db"
+                  
+     putAsm [sizeDecl ++ " " ++ dwarfAttributeToString a ++ "\n"]
+  
+dwarfAttributeToString :: DWARFAttribute -> [Char]
+dwarfAttributeToString (DWARFAttributeRefStrp d) = show d
+dwarfAttributeToString (DWARFAttributeAddr a) = show a
+dwarfAttributeToString (DWARFAttributeBlock1 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
+dwarfAttributeToString (DWARFAttributeBlock2 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
+dwarfAttributeToString (DWARFAttributeBlock4 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
+dwarfAttributeToString (DWARFAttributeBlock8 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
+dwarfAttributeToString (DWARFAttributeBlock s d) = "0x" ++ unsignedLEB128ToString s ++ ", " ++ bytesToString d ++ "\n"
+dwarfAttributeToString (DWARFAttributeData1UnsignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData1SignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData2UnsignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData2SignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData4UnsignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData4SignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData4Float d) = show d
+dwarfAttributeToString (DWARFAttributeData8UnsignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData8SignedInt d) = show d
+dwarfAttributeToString (DWARFAttributeData8Double d) = show d
+dwarfAttributeToString (DWARFAttributeDataUnsignedLEB128 d) = unsignedLEB128ToString d
+--dwarfAttributeToString (DWARFAttributeDataSignedLEB128 _) = 
+--dwarfAttributeToString (DWARFAttributeExprLoc) = 0 
+dwarfAttributeToString (DWARFAtttributeFlag d) = show d
+dwarfAttributeToString (DWARFAttributeLinePtr d) = show d
+dwarfAttributeToString (DWARFAttributeLocListPtr d) = show d
+dwarfAttributeToString (DWARFAttributeMacPtr d) = show d
+dwarfAttributeToString (DWARFAttributeRangeListPtr d) = show d
+dwarfAttributeToString (DWARFAttributeRef1 d) = show d
+dwarfAttributeToString (DWARFAttributeRef2 d) = show d
+dwarfAttributeToString (DWARFAttributeRef4 d) = show d
+dwarfAttributeToString (DWARFAttributeRef8 d) = show d
+dwarfAttributeToString (DWARFAttributeRefUData d) = unsignedLEB128ToString d
+dwarfAttributeToString (DWARFAttributeRefAddr d) = show d
+dwarfAttributeToString (DWARFAttributeRefSig8 d) = show d
+dwarfAttributeToString (DWARFAttributeRefString s) = s ++ ",0"
+dwarfAttributeToString (DWARFAttributeRefStrp p) = show p
+dwarfAttributeToString (DWARFDIECrossReference i) = show i
+dwarfAttributeToString k = error (show k)
+
+putDWARFDIE :: DWARFDIE -> CodeTransformation ()
+putDWARFDIE dwarfDIE =
+  do liftIO $ putStrLn ("DIE of offst " ++ show (dwarfDIEOffset dwarfDIE))
+     putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dwarfDIE)) ++ "\n"]
+     mapM_ putDWARFAttribute (dwarfDIEAttributes dwarfDIE)
      
+putDWARFDIEs :: CodeTransformation ()
+putDWARFDIEs =
+  do bucket <- getAsmBucket
+     rawDIEs <- gets (debugInfoDIEs . compileStateDebugInfo) 
+     let dwarfDIEs = map snd (sortBy (comparing (dwarfDIEOffset .snd)) (Map.toAscList rawDIEs))
+     
+     setAsmBucket debug_info_  
+     mapM_ putDWARFDIE dwarfDIEs
+     
+     setAsmBucket bucket
+
+putDWARFString :: [Char] -> CodeTransformation ()
+putDWARFString string =
+  do putAsm ["db " ++ show string ++ ",0\n"]
+  
+putDWARFStrings :: CodeTransformation ()
+putDWARFStrings =
+  do strings <- gets (debugInfoStrings . compileStateDebugInfo)
+     bucket <- getAsmBucket
+  
+     setAsmBucket debug_str_
+     mapM_ putDWARFString strings
+     setAsmBucket bucket
+
 linkedListDeclaration :: Symbol -> CodeTransformation ()
 linkedListDeclaration (Type {typeName = name}) =
   putAsm
@@ -5460,72 +5608,6 @@ getDataType :: CodeState -> VariableType
 getDataType CompileState {compileStateRegisters = CPUContext {cpuContextDataType = dataType}} =
         dataType
 
-encodeUnsignedLEB128 :: Int -> [Char]
-encodeUnsignedLEB128 integer =
-
-  if recurse integer
-  then "0x" ++ intToHexString ((extractLowOrder7Bits integer) .|. 0x80) ++ ", " ++ encodeUnsignedLEB128 (shiftRight7Bits integer)
-  else "0x" ++ intToHexString (extractLowOrder7Bits integer)
-  
-  where recurse i = shiftRight7Bits i > 0
-        extractLowOrder7Bits i = i .&. 0x7F
-        shiftRight7Bits i = shift i (-7)
-        
-        
-encodeSignedLEB128 :: Int -> [Char]
-encodeSignedLEB128 integer =
- 
-  if recurse integer
-  then "0x" ++ intToHexString ((extractLowOrder7Bits integer) .|. 0x80) ++ ", " ++ encodeSignedLEB128 (shiftRight7Bits integer)
-  else "0x" ++ intToHexString (extractLowOrder7Bits integer)
-  
-  where recurse i = not ((shiftRight7Bits i == 0 && (encodedByte i .&. 0x40 == 0)) || (shiftRight7Bits i == (-1) && (encodedByte i .&. 0x40 == 0x40)))
-        encodedByte i = extractLowOrder7Bits i
-        extractLowOrder7Bits i = i .&. 0x7F
-        shiftRight7Bits i = shift i (-7)
-        
-intToHexString :: Int -> [Char]
-intToHexString integer =
-  if isolateRest integer /= 0
-  then  (intToHexString . shiftRight4Bits) integer ++ (nibbleToHexDigit . isolateNibble) integer
-  else (nibbleToHexDigit . isolateNibble) integer
-  where shiftRight4Bits i = uShiftR i 4
-        isolateNibble i = i .&. 0xF
-        isolateRest i = i .&. 0xFFFFFFFFFFFFFFF0
-        nibbleToHexDigit n =
-          case n of
-            0 -> "0"
-            1 -> "1"
-            2 -> "2"
-            3 -> "3"
-            4 -> "4"
-            5 -> "5"
-            6 -> "6"
-            7 -> "7"
-            8 -> "8"
-            9 -> "9"
-            10 -> "A"
-            11 -> "B"
-            12 -> "C"
-            13 -> "D"
-            14 -> "E"
-            15 -> "F"
-
-intToBinString :: Int -> [Char]
-intToBinString integer =
-  if isolateRest integer /= 0
-  then (intToBinString . shiftRight1Bit) integer ++ (bitToBinDigit . isolateBit) integer
-  else (bitToBinDigit . isolateBit) integer
-  where shiftRight1Bit i = uShiftR i 1
-        isolateBit i = i .&. 1
-        isolateRest i = i .&. (-2)
-        bitToBinDigit n =
-          case n of
-            0 -> "0"
-            1 -> "1"
-
-uShiftR :: Int -> Int -> Int
-uShiftR n k = fromIntegral (fromIntegral n `shiftR` k :: Word)
 
 compilerIncrementLineNumber :: CodeTransformation ()
 compilerIncrementLineNumber =

@@ -102,6 +102,7 @@ data CodeState =
        semanticStateFloats :: FloatConstantTable,
        semanticStateStrings :: StringTable,
        semanticStateNameSpace :: Symbol,
+       semanticStateDebugInfo :: DebugInfo,
        semanticStateLoopDepth :: Int,
        semanticStateConfig :: Config
      } |
@@ -118,6 +119,7 @@ data CodeState =
        compileStateStrings :: StringTable,
        compileStateNameSpace :: Symbol,
        compileStateExitLabelIDs :: [Int],
+       compileStateDebugInfo :: DebugInfo,
        compileStateRegisters :: CPUContext,
        compileStateLineNumber :: Int,
        compileStateLabelID :: Int,

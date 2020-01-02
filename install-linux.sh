@@ -10,5 +10,6 @@ cp libkoshka.core.so /usr/lib/
 cp libkoshka.mm.so /usr/lib/
 cp nasm /usr/bin/
 cp fasm /usr/bin/
+cp iwls /usr/bin
 
 cp Examples/*.bb /usr/share/doc/Idlewild-Lang/Examples/

@@ -81,6 +81,7 @@ parse =
             semanticStateFloats = Map.empty,
             semanticStateStrings = Map.empty,
             semanticStateNameSpace = NO_NAMESPACE,
+            semanticStateDebugInfo = DebugInfo Seq.empty 0 Map.empty 0,
             semanticStateLoopDepth = 0,
             semanticStateConfig = config}
      

@@ -86,124 +86,13 @@ data FunctionCallContext =
   }
   deriving (Show)
 
-data DebugInfo =
-  DebugInfo
-  {
-    debugInfoAbbreviations :: Map.Map [Char] DWARFAbbreviation
-  }
-  deriving(Show)
-
-rawAbbreviations =
-  [DWARFAbbreviation
-     "COMPILE_UNIT"
-     (dwarfTag "DW_TAG_compile_unit")
-     dwarfHasChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_producer") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_language") (dwarfForm "DW_FORM_data1"),
-      DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_comp_dir") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_low_pc") (dwarfForm "DW_FORM_addr"),
-      DWARFAttributeSpec (dwarfName "DW_AT_high_pc") (dwarfForm "DW_FORM_data8"),
-      DWARFAttributeSpec (dwarfName "DW_AT_stmt_list") (dwarfForm "DW_FORM_sec_offset")],
-      
-   DWARFAbbreviation
-     "SUBPROGRAM"
-     (dwarfTag "DW_TAG_subprogram")
-     dwarfHasChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_external") (dwarfForm "DW_FORM_flag_present"),
-      DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_prototyped") (dwarfForm "DW_FORM_flag_present"),
-      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_low_pc") (dwarfForm "DW_FORM_addr"),
-      DWARFAttributeSpec (dwarfName "DW_AT_high_pc") (dwarfForm "DW_FORM_data8"),
-      DWARFAttributeSpec (dwarfName "DW_AT_frame_base") (dwarfForm "DW_FORM_exprloc"),
-      DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
-
-   DWARFAbbreviation
-     "BASE_TYPE"
-     (dwarfTag "DW_TAG_base_type")
-     dwarfNoChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data1"),
-      DWARFAttributeSpec (dwarfName "DW_AT_encoding") (dwarfForm "DW_FORM_data1"),
-      DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp")],
 
 
-   DWARFAbbreviation
-     "POINTER_TYPE"
-     (dwarfTag "DW_TAG_base_type")
-     dwarfNoChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data1"),
-      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4")],
-   
-   DWARFAbbreviation
-     "ARRAY_TYPE"
-     (dwarfTag "DW_TAG_array_type")
-     dwarfNoChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],   
-   
-   DWARFAbbreviation  
-     "SUBRANGE_TYPE"
-     (dwarfTag "DW_TAG_subrange_type")
-     dwarfNoChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_upper_bound") (dwarfForm "DW_FORM_data8")],   
-   
-   DWARFAbbreviation  
-     "CUSTOM_TYPE"
-     (dwarfTag "DW_TAG_structure_type")
-     dwarfHasChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
-   
-   DWARFAbbreviation
-     "MEMBER"
-     (dwarfTag "DW_TAG_member")
-     dwarfHasChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_data_member_location") (dwarfForm "DW_FORM_data4")],
-   
-   DWARFAbbreviation   
-     "VARIABLE"
-     (dwarfTag "DW_TAG_variable")
-     dwarfNoChildren
-     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_external") (dwarfForm "DW_FORM_flag_present"),
-      DWARFAttributeSpec (dwarfName "DW_AT_declaration") (dwarfForm "DW_FORM_flag_present")],
-   
-    
-   DWARFAbbreviation
-     "NONE"
-     0
-     dwarfNoChildren
-     []
-      
-      
-      
-      ]
-       
-indexedAbbreviations =
-  map (\t -> (fst t) (snd t))
-      (zip rawAbbreviations [1,2..])
-
-idlewildLangAbbreviations =
-  Map.fromList (map (\t -> (abbreviationKey t,t)) indexedAbbreviations)
-         
+{--         
 getDWARFAbbreviation :: [Char] -> DWARFAbbreviation
 getDWARFAbbreviation key =
   fromJust (Map.lookup key idlewildLangAbbreviations)
-  
+  --}
 rax = Register "rax" 0 False False
 rbx = Register "rbx" 0 False False
 rbp = Register "rbp" 0 False False

@@ -460,6 +460,11 @@ long long int bb_rand(long long int lower_bound,long long int upper_bound)
     return lower_bound + result % upper_bound;
 }
 
+void bb_init_string(char **string)
+{
+    *string = "";
+}
+
 void bb_free_string(char *string)
 {
     if(string && strlen(string) > 0)

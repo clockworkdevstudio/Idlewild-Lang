@@ -1,5 +1,8 @@
 module DWARF where
 
+import Data.Int
+import Data.Word
+import Data.Bits
 import Data.Maybe
 import qualified Data.Map as Map
 
@@ -11,6 +14,209 @@ data DWARFAttributeSpec =
   }
   deriving (Show)
 
+
+data DWARFDIE =
+  DWARFDIE
+  {
+    dwarfDIEKey :: [Char],
+    dwarfDIEAbbreviationCode :: Int,
+    dwarfDIEAttributes :: [DWARFAttribute],
+    dwarfDIEAttributesSize :: Int,
+    dwarfDIEOffset :: Int
+  }
+  deriving (Show)
+
+data DWARFAttribute =
+  DWARFAttributeAddr
+  {
+    attributeAddr :: Int64
+  } |
+  DWARFAttributeBlock1
+  {
+    attributeBlock1Length :: Word8,
+    attributeBlock1Data :: [Word8]
+  } |
+  DWARFAttributeBlock2
+  {
+    attributeBlock2Length :: Word16,
+    attributeBlock2Data :: [Word8]
+  } |
+  DWARFAttributeBlock4
+  {
+    attributeBlock4Length :: Word32,
+    attributeBlock4Data :: [Word8]
+  } |
+  DWARFAttributeBlock8
+  {
+    attributeBlock8Length :: Word64,
+    attributeBlock8Data :: [Word8]
+  } |
+  DWARFAttributeBlock
+  {
+    attributeBlockLength :: DWARFUnsignedLEB128,
+    attributeBlockData :: [Word8]
+  } |
+  DWARFAttributeData1UnsignedInt
+  {
+    attributeData1UInt :: Word8
+  } |
+  DWARFAttributeData1SignedInt
+  {
+    attributeData1Int :: Int8
+  } |
+  DWARFAttributeData2UnsignedInt
+  {
+    attributeData2UInt :: Word16
+  } |
+  DWARFAttributeData2SignedInt
+  {
+    attributeData2Int :: Int16
+  } |
+  DWARFAttributeData4UnsignedInt
+  {
+    attributeData4UInt :: Word32
+  } |
+  DWARFAttributeData4SignedInt
+  {
+    attributeData4Int :: Int32
+  } |
+  DWARFAttributeData4Float
+  {
+    attributeData4Float :: Float
+  } |
+  DWARFAttributeData8UnsignedInt
+  {
+    attributeData8UInt :: Word64
+  } |
+  DWARFAttributeData8SignedInt
+  {
+    attributeData8Int :: Int64
+  } |
+  DWARFAttributeData8Double
+  {
+    attributeData8Double :: Double
+  } |
+  DWARFAttributeDataUnsignedLEB128
+  {
+    attributeDataULEB128 :: DWARFUnsignedLEB128
+  } |
+  DWARFAttributeDataSignedLEB128
+  {
+    attributeDataSLEB128 :: DWARFSignedLEB128
+  } |
+  DWARFAttributeExprLoc
+  {
+  
+  } |
+  DWARFAtttributeFlag
+  {
+    attributeFlag :: Bool
+  } |
+  DWARFAttributeLinePtr
+  {
+    attributeLinePtr :: Int32
+  } |
+  DWARFAttributeLocListPtr
+  {
+    attributeLocListPtr :: Int32
+  } |
+  DWARFAttributeMacPtr
+  {
+    attributeMacPtr :: Int32
+  } |
+  DWARFAttributeRangeListPtr
+  {
+    attributeRangeListPtr :: Int32
+  } |
+  DWARFAttributeRef1
+  {
+    attributeRef1 :: Word8
+  } |
+  DWARFAttributeRef2
+  {
+    attributeRef2 :: Word16
+  } |
+  DWARFAttributeRef4
+  {
+    attributeRef4 :: Word32
+  } |
+  DWARFAttributeRef8
+  {
+    attributeRef8 :: Word64
+  } |
+  DWARFAttributeRefUData
+  {
+    attributeRefUData :: DWARFUnsignedLEB128
+  } |
+  DWARFAttributeRefAddr
+  {
+    attributeRefAddr :: Word32
+  } |
+  DWARFAttributeRefSig8
+  {
+    attributeRefSig8 :: Word64
+  } |
+  DWARFAttributeRefString
+  {
+    attributeRefString :: [Char]
+  } |
+  DWARFAttributeRefStrp
+  {
+    attributeRefStrp :: Word32
+  } |
+  DWARFDIECrossReference
+  {
+    crossReferenceOffset :: Int
+  }
+  deriving (Show)
+
+dwarfAttributeSize :: DWARFAttribute -> Int
+dwarfAttributeSize (DWARFAttributeRefStrp _) = 4 
+dwarfAttributeSize (DWARFAttributeAddr _) = 8
+dwarfAttributeSize (DWARFAttributeBlock1 s d) = 1 + (fromIntegral s) * length d
+dwarfAttributeSize (DWARFAttributeBlock2 s d) = 2 + (fromIntegral s) * length d
+dwarfAttributeSize (DWARFAttributeBlock4 s d) = 4 + (fromIntegral s) * length d
+dwarfAttributeSize (DWARFAttributeBlock8 s d) = 8 + (fromIntegral s) * length d
+dwarfAttributeSize (DWARFAttributeBlock s d) = length (uLEB128 s) + decodeUnsignedLEB128 s * length d
+dwarfAttributeSize (DWARFAttributeData1UnsignedInt _) = 1
+dwarfAttributeSize (DWARFAttributeData1SignedInt _) = 1
+dwarfAttributeSize (DWARFAttributeData2UnsignedInt _) = 2
+dwarfAttributeSize (DWARFAttributeData2SignedInt _) = 2
+dwarfAttributeSize (DWARFAttributeData4UnsignedInt _) = 4
+dwarfAttributeSize (DWARFAttributeData4SignedInt _) = 4
+dwarfAttributeSize (DWARFAttributeData4Float _) = 4
+dwarfAttributeSize (DWARFAttributeData8UnsignedInt _) = 8
+dwarfAttributeSize (DWARFAttributeData8SignedInt _) = 8
+dwarfAttributeSize (DWARFAttributeData8Double _) = 8
+dwarfAttributeSize (DWARFAttributeDataUnsignedLEB128 d) = length (uLEB128 d)
+--dwarfAttributeSize (DWARFAttributeDataSignedLEB128 _) = 
+--dwarfAttributeSize (DWARFAttributeExprLoc) = 0 
+dwarfAttributeSize (DWARFAtttributeFlag _) = 1
+dwarfAttributeSize (DWARFAttributeLinePtr _) = 4
+dwarfAttributeSize (DWARFAttributeLocListPtr _) = 4
+dwarfAttributeSize (DWARFAttributeMacPtr _) = 4
+dwarfAttributeSize (DWARFAttributeRangeListPtr _) = 4
+dwarfAttributeSize (DWARFAttributeRef1 _) = 1
+dwarfAttributeSize (DWARFAttributeRef2 _) = 2
+dwarfAttributeSize (DWARFAttributeRef4 _) = 4
+dwarfAttributeSize (DWARFAttributeRef8 _) = 8
+dwarfAttributeSize (DWARFAttributeRefUData d) = length (uLEB128 d)
+dwarfAttributeSize (DWARFAttributeRefAddr _) = 4
+dwarfAttributeSize (DWARFAttributeRefSig8 _) = 8
+dwarfAttributeSize (DWARFAttributeRefString s) = length s + 1
+dwarfAttributeSize (DWARFAttributeRefStrp _) = 4
+dwarfAttributeSize (DWARFDIECrossReference _) = 4
+dwarfAttributeSize k = error (show k)
+
+dwarfCreateDIE :: [Char] -> Int -> [DWARFAttribute] -> (Int -> DWARFDIE)
+dwarfCreateDIE key abbrevCode attributes =
+  DWARFDIE
+    key abbrevCode attributes (foldr (\da a -> dwarfAttributeSize da + a) 0 attributes)
+
+dwarfDIECalculateSize :: DWARFDIE -> Int
+dwarfDIECalculateSize die =
+  length (uLEB128 (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode die))) + (foldr (\da a -> dwarfAttributeSize da + a) 0 (dwarfDIEAttributes die))
+  
 data DWARFAbbreviation =
   DWARFAbbreviation
   {
@@ -21,6 +227,68 @@ data DWARFAbbreviation =
     abbreviationCode :: Int    
   }
   deriving (Show)
+
+data DWARFUnsignedLEB128 =
+  DWARFUnsignedLEB128
+  {
+    uLEB128 :: [Word8]
+  }
+  deriving (Show)
+
+data DWARFSignedLEB128 =
+  DWARFSignedLEB128
+  {
+    sLEB128 :: [Word8]
+  }
+  deriving (Show)
+
+dwarfUnsignedLEB128Cat :: DWARFUnsignedLEB128 -> DWARFUnsignedLEB128 -> DWARFUnsignedLEB128
+dwarfUnsignedLEB128Cat (DWARFUnsignedLEB128 l) (DWARFUnsignedLEB128 r) =
+  DWARFUnsignedLEB128 (l ++ r)
+
+dwarfSignedLEB128Cat :: DWARFSignedLEB128 -> DWARFSignedLEB128 -> DWARFSignedLEB128
+dwarfSignedLEB128Cat  (DWARFSignedLEB128 l) (DWARFSignedLEB128 r)=
+  DWARFSignedLEB128 (l ++ r)
+  
+encodeUnsignedLEB128 :: Int -> DWARFUnsignedLEB128
+encodeUnsignedLEB128 integer =
+
+  if recurse integer
+  then (DWARFUnsignedLEB128 [(fromIntegral ((extractLowOrder7Bits integer) .|. 0x80))]) `dwarfUnsignedLEB128Cat`
+       encodeUnsignedLEB128 (shiftRight7Bits integer)
+  else (DWARFUnsignedLEB128 [(fromIntegral (extractLowOrder7Bits integer))])
+  
+  where recurse i = shiftRight7Bits i > 0
+        extractLowOrder7Bits i = i .&. 0x7F
+        shiftRight7Bits i = shift i (-7)
+
+decodeUnsignedLEB128 :: DWARFUnsignedLEB128 -> Int
+decodeUnsignedLEB128 e =
+  decode e 0 0
+  
+  where byte = fromIntegral (head (uLEB128 e))
+        update n s = n .|. (shift (byte .&. 0x7f) s) 
+        decode i accum s =
+          if uLEB128 i == []
+          then accum
+          else decode (DWARFUnsignedLEB128 (tail (uLEB128 i))) (update accum s) (s + 7)
+             
+encodeSignedLEB128 :: Int -> DWARFSignedLEB128
+encodeSignedLEB128 integer =
+ 
+  if recurse integer
+  then (DWARFSignedLEB128 [(fromIntegral ((extractLowOrder7Bits integer) .|. 0x80))]) `dwarfSignedLEB128Cat`
+       encodeSignedLEB128 (shiftRight7Bits integer)
+  else (DWARFSignedLEB128 [(fromIntegral (extractLowOrder7Bits integer))])
+  
+  where recurse i = not ((shiftRight7Bits i == 0 && (encodedByte i .&. 0x40 == 0)) || (shiftRight7Bits i == (-1) && (encodedByte i .&. 0x40 == 0x40)))
+        encodedByte i = extractLowOrder7Bits i
+        extractLowOrder7Bits i = i .&. 0x7F
+        shiftRight7Bits i = shift i (-7)
+
+uShiftR :: Int -> Int -> Int
+uShiftR n k = fromIntegral (fromIntegral n `shiftR` k :: Word)
+
     
 dwarfTags =
   [(0x1,"DW_TAG_array_type"),
@@ -195,7 +463,7 @@ dwarfAttributeNames =
    (0x6e,"DW_AT_linkage_name"),
    (0x2000,"DW_AT_lo_user"),
    (0x3fff,"DW_AT_hi_user")]
-    
+
 dwarfAttributeNameEncodingToStringMap =
   Map.fromList (map (\t -> (fst t :: Int,snd t)) dwarfAttributeNames)
 
@@ -251,6 +519,39 @@ dwarfStringToAttributeFormEncoding :: [Char] -> Int
 dwarfStringToAttributeFormEncoding string =
   fromJust(Map.lookup string dwarfStringToAttributeFormEncodingMap)
 
+dwarfAttributeEncodings =
+  [(0x1,"DW_ATE_address"),
+   (0x2,"DW_ATE_boolean"),
+   (0x3,"DW_ATE_complex_float"),
+   (0x4,"DW_ATE_float"),
+   (0x5,"DW_ATE_signed"),
+   (0x6,"DW_ATE_signed_char"),
+   (0x7,"DW_ATE_unsigned"),
+   (0x8,"DW_ATE_unsigned_char"),
+   (0x9,"DW_ATE_imaginary_float"),
+   (0xa,"DW_ATE_packed_decimal"),
+   (0xb,"DW_ATE_numeric_string"),
+   (0xc,"DW_ATE_edited"),
+   (0xd,"DW_ATE_signed_fixed"),
+   (0xe,"DW_ATE_unsigned_fixed"),
+   (0xf,"DW_ATE_decimal_float"),
+   (0x10,"DW_ATE_UTF"),
+   (0x80,"DW_ATE_lo_user"),
+   (0xff,"DW_ATE_hi_user")]
+   
+dwarfAttributeEncodingToStringMap =
+  Map.fromList (map (\t -> (fst t :: Int,snd t)) dwarfAttributeEncodings)
+
+dwarfStringToAttributeEncodingMap =
+  Map.fromList (map (\t -> (snd t,fst t :: Int)) dwarfAttributeEncodings)
+
+dwarfAttributeEncodingToString :: Int -> [Char]
+dwarfAttributeEncodingToString encoding =
+  fromJust (Map.lookup encoding dwarfAttributeEncodingToStringMap)
+  
+dwarfStringToAttributeEncoding :: [Char] -> Int
+dwarfStringToAttributeEncoding string =
+  fromJust(Map.lookup string dwarfStringToAttributeEncodingMap)
 
 dwarfTag = dwarfStringToTagEncoding
 dwarfName = dwarfStringToAttributeNameEncoding

@@ -33,6 +33,7 @@ module Semantics where
 import ParserData
 import SemanticsData
 import CompilerData
+import DWARF
 
 import Common
 import Options
@@ -40,6 +41,7 @@ import Lexer
 import Parser
 
 import Data.Char
+import Data.Word
 import Data.List
 import Data.Ord
 import Data.Bits
@@ -59,11 +61,17 @@ semantics :: CodeTransformation ()
 semantics =
   do verbose <- gets (optionVerbose . configOptions . semanticStateConfig)
      console <- gets (optionConsole . configOptions . semanticStateConfig)
+     debug <- gets (optionDebug . configOptions . semanticStateConfig)
      (Statement {statementContents = (program:_)}:_)  <-  gets semanticStateProgram
      addEndFunction
      verboseCommentary ("Populating symbol tables...\n") verbose
      collectSymbols program
      verboseCommentary ("Checking program semantics...\n") verbose
+     
+     if debug
+     then do addIntrinsicTypeDIEs
+     else return ()
+     
      codeSemantics program
      
      markStandardFunctionAsUsed "init_libkoshka_core"
@@ -124,6 +132,7 @@ semantics =
      ints <- gets semanticStateInts
      floats <- gets semanticStateFloats
      strings <- gets semanticStateStrings
+     debugInfo <- gets semanticStateDebugInfo
      config <- gets semanticStateConfig
      types <- gets semanticStateTypes
      let options = configOptions config
@@ -140,6 +149,7 @@ semantics =
             compileStateStrings = strings,
             compileStateNameSpace = NO_NAMESPACE,
             compileStateExitLabelIDs = [],
+            compileStateDebugInfo = debugInfo,
             compileStateRegisters = createCPUContext (numPreservedRegisters - 1),
             compileStateLineNumber = 1,
             compileStateLabelID = 0,
@@ -1606,7 +1616,20 @@ addVariable (Variable {variableName = name,
                        variableIsGlobal = isGlobal}) =
         do state <- get
            put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) (Variable {variableName = name, variableType = dataType, variableIsGlobal = isGlobal}) (semanticStateSymbols state))}
-
+           if (optionDebug . configOptions . semanticStateConfig) state
+           then do abbreviation <- lookupAbbreviation "__ABBREV_VARIABLE"
+                   crossReference <- variableTypeToDWARFCrossReference dataType
+                   stringOffset <- addDWARFString (removeTypeTag name)
+                   
+                   addDWARFDIE (dwarfCreateDIE
+                                ("__DIE_VARIABLE_" ++ (removeTypeTag name))
+                                (abbreviationCode abbreviation)
+                                  [DWARFAttributeRefStrp (fromIntegral stringOffset),
+                                   DWARFAttributeData2UnsignedInt 0,
+                                   DWARFAttributeData4UnsignedInt 88,
+                                   DWARFDIECrossReference crossReference])
+           else return ()
+           
 addVariable (Array {arrayName = name,
                     arrayType = dataType,
                     arrayNumDimensions = numDimensions}) =
@@ -2466,6 +2489,63 @@ setSemanticStateSymbols :: SymbolTable -> CodeTransformation ()
 setSemanticStateSymbols symbolTable =
   do state <- get
      put state {semanticStateSymbols = symbolTable}
+ 
+variableTypeToDWARFCrossReference :: VariableType -> CodeTransformation (Int)
+variableTypeToDWARFCrossReference dataType =
+  do dwarfDIEs <- gets (debugInfoDIEs . semanticStateDebugInfo)
+     let dieKey = 
+           case dataType of
+             VARIABLE_TYPE_INT -> "__DIE_BASE_TYPE_INT"
+             VARIABLE_TYPE_FLOAT -> "__DIE_BASE_TYPE_FLOAT"
+     return (dwarfDIEOffset (fromJust (Map.lookup dieKey dwarfDIEs)))
+
+lookupAbbreviation :: [Char] -> CodeTransformation (DWARFAbbreviation)
+lookupAbbreviation key =
+  do return (fromJust (Map.lookup key idlewildLangAbbreviations))
+  
+addIntrinsicTypeDIEs :: CodeTransformation ()
+addIntrinsicTypeDIEs =
+  do abbreviation <- lookupAbbreviation "__ABBREV_BASE_TYPE"
+     stringOffset <- addDWARFString "int"
+     addDWARFDIE
+       (dwarfCreateDIE
+        "__DIE_BASE_TYPE_INT"
+         (abbreviationCode abbreviation)
+         [DWARFAttributeData1UnsignedInt 8,
+          DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_signed")),
+          DWARFAttributeRefStrp (fromIntegral stringOffset)])
+
+     stringOffset <- addDWARFString "float"
+     addDWARFDIE
+       (dwarfCreateDIE
+        "__DIE_BASE_TYPE_FLOAT"
+        (abbreviationCode abbreviation)
+        [DWARFAttributeData1UnsignedInt 8,
+         DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_float")),
+         DWARFAttributeRefStrp (fromIntegral stringOffset)])
+
+addDWARFDIE :: (Int -> DWARFDIE) -> CodeTransformation ()
+addDWARFDIE partialDIE =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     let offset = debugInfoDIEOffset debugInfo
+         die = partialDIE offset
+         dies = debugInfoDIEs debugInfo
+     liftIO $ putStrLn ("adding DIE with offst " ++ show offset)
+     put state {semanticStateDebugInfo =
+                  debugInfo {debugInfoDIEs = Map.insert (dwarfDIEKey die) die dies,
+                             debugInfoDIEOffset = dwarfDIECalculateSize die + offset}}
+
+addDWARFString :: [Char] -> CodeTransformation (Int)
+addDWARFString value =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     let offset = debugInfoStringOffset debugInfo
+         strings = debugInfoStrings debugInfo
+         updatedOffset = offset + length value + 1
+     put state {semanticStateDebugInfo = debugInfo {debugInfoStrings = strings Seq.|> value,
+                                                    debugInfoStringOffset = updatedOffset}}
+     return offset
 
 throwSemanticError :: String -> Statement -> CodeTransformation ()
 throwSemanticError msg (Statement {statementLineNumber = lineNumber,
