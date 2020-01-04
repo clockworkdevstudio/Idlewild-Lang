@@ -189,6 +189,7 @@ codeSemantics (Statement {statementContents = statements})
                                   STATEMENT_BEGINNING_OF_FILE -> beginningOfFileSemantics
                                   STATEMENT_END_OF_FILE -> endOfFileSemantics
                                   STATEMENT_CODE -> codeSemantics
+                                  STATEMENT_TYPE -> typeSemantics
                                   STATEMENT_INSERT_BEFORE -> insertSemantics
                                   STATEMENT_INSERT_AFTER -> insertSemantics
                                   STATEMENT_DELETE -> deleteSemantics
@@ -269,6 +270,16 @@ collectSymbols (Statement {statementContents = statements})
 
         doNothing _ = do return ()
 
+typeSemantics :: Statement -> CodeTransformation ()
+typeSemantics (Statement {statementContents = (Statement {statementContents = (typeName:_)}):fieldNames}) =
+  do debug <- gets (optionDebug . configOptions . semanticStateConfig)
+     types <- gets semanticStateTypes
+     let sourceName = identifierExpressionValue (getInitialStatement typeName)
+         customType = Map.lookup (map toLower (removeTypeTag sourceName)) types
+     if debug
+     then do putDWARFType (fromJust customType)
+     else return ()
+     
 dimStatementSemantics :: Statement -> CodeTransformation ()
 dimStatementSemantics (Statement {statementContents = expressionList}) =
         
@@ -339,7 +350,7 @@ collectTypeSymbols (Statement {statementContents = (Statement {statementContents
 
      customType <- collectFieldSymbols newCustomType fieldNames 0
      addType customType name
-
+     
 collectFieldSymbols :: Symbol -> [Statement] -> Int -> CodeTransformation Symbol
 collectFieldSymbols customType (statement:rest) depth =
   do types <- gets semanticStateTypes
@@ -1617,17 +1628,7 @@ addVariable (Variable {variableName = name,
         do state <- get
            put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) (Variable {variableName = name, variableType = dataType, variableIsGlobal = isGlobal}) (semanticStateSymbols state))}
            if (optionDebug . configOptions . semanticStateConfig) state
-           then do abbreviation <- lookupAbbreviation "__ABBREV_VARIABLE"
-                   crossReference <- variableTypeToDWARFCrossReference dataType
-                   stringOffset <- addDWARFString (removeTypeTag name)
-                   
-                   addDWARFDIE (dwarfCreateDIE
-                                ("__DIE_VARIABLE_" ++ (removeTypeTag name))
-                                (abbreviationCode abbreviation)
-                                  [DWARFAttributeRefStrp (fromIntegral stringOffset),
-                                   DWARFAttributeData2UnsignedInt 0,
-                                   DWARFAttributeData4UnsignedInt 88,
-                                   DWARFDIECrossReference crossReference])
+           then do putDWARFVariable name dataType
            else return ()
            
 addVariable (Array {arrayName = name,
@@ -2497,6 +2498,8 @@ variableTypeToDWARFCrossReference dataType =
            case dataType of
              VARIABLE_TYPE_INT -> "__DIE_BASE_TYPE_INT"
              VARIABLE_TYPE_FLOAT -> "__DIE_BASE_TYPE_FLOAT"
+             VARIABLE_TYPE_STRING -> "__DIE_BASE_TYPE_STRING"
+             
      return (dwarfDIEOffset (fromJust (Map.lookup dieKey dwarfDIEs)))
 
 lookupAbbreviation :: [Char] -> CodeTransformation (DWARFAbbreviation)
@@ -2505,12 +2508,42 @@ lookupAbbreviation key =
   
 addIntrinsicTypeDIEs :: CodeTransformation ()
 addIntrinsicTypeDIEs =
-  do abbreviation <- lookupAbbreviation "__ABBREV_BASE_TYPE"
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     put state {semanticStateDebugInfo = debugInfo {debugInfoDIEOffset = (fromIntegral dwarfCompilationUnitHeaderSize)}}
+     compileUnitAbbreviation <- lookupAbbreviation "__ABBREV_COMPILE_UNIT"
+     baseTypeAbbreviation <- lookupAbbreviation "__ABBREV_BASE_TYPE"
+     pointerTypeAbbreviation <- lookupAbbreviation "__ABBREV_POINTER_TYPE"
+     
+     fileName <- gets (configSourceFileName . semanticStateConfig)
+     stringOffset <- addDWARFString "idlewild-lang"
+     fileNameStringOffset <- addDWARFString fileName
+     compDirStringOffset <- addDWARFString "the government are watching me; they're putting things in my tea!"
+     
+     addDWARFDIE
+       (dwarfCreateDIE
+        "__DIE_COMPILE_UNIT"
+         compileUnitAbbreviation
+         0
+         -- (abbreviationCode baseTypeAbbreviation)
+         [DWARFAttributeRefStrp (fromIntegral stringOffset),
+          DWARFAttributeData1UnsignedInt 0xC, -- C99
+          DWARFAttributeRefStrp (fromIntegral fileNameStringOffset),
+          DWARFAttributeRefStrp (fromIntegral compDirStringOffset), --comp dir
+          DWARFAttributeAddr 0, -- lo pc
+          DWARFAttributeData8UnsignedInt 0, -- hi pc
+          DWARFAttributeRef4 0 -- sec offset (position of line numbers in .debug_line)
+          ])
+
+     --modifyDWARFDIEOffset 1
+
      stringOffset <- addDWARFString "int"
      addDWARFDIE
        (dwarfCreateDIE
         "__DIE_BASE_TYPE_INT"
-         (abbreviationCode abbreviation)
+         baseTypeAbbreviation
+         0
+         -- (abbreviationCode baseTypeAbbreviation)
          [DWARFAttributeData1UnsignedInt 8,
           DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_signed")),
           DWARFAttributeRefStrp (fromIntegral stringOffset)])
@@ -2519,10 +2552,42 @@ addIntrinsicTypeDIEs =
      addDWARFDIE
        (dwarfCreateDIE
         "__DIE_BASE_TYPE_FLOAT"
-        (abbreviationCode abbreviation)
+        baseTypeAbbreviation
+        0
+        --(abbreviationCode baseTypeAbbreviation)
         [DWARFAttributeData1UnsignedInt 8,
          DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_float")),
          DWARFAttributeRefStrp (fromIntegral stringOffset)])
+     
+     stringOffset <- addDWARFString "char"
+     addDWARFDIE
+       (dwarfCreateDIE
+        "__DIE_BASE_TYPE_CHAR"
+        baseTypeAbbreviation
+        0
+        -- (abbreviationCode baseTypeAbbreviation)
+        [DWARFAttributeData1UnsignedInt 1,
+         DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_signed_char")),
+         DWARFAttributeRefStrp (fromIntegral stringOffset)])
+
+     dwarfDIEs <- gets (debugInfoDIEs . semanticStateDebugInfo)
+     let charCrossReference = dwarfDIEOffset (fromJust (Map.lookup "__DIE_BASE_TYPE_CHAR" dwarfDIEs))
+     addDWARFDIE
+       (dwarfCreateDIE
+        "__DIE_BASE_TYPE_STRING"
+        pointerTypeAbbreviation
+        0
+        -- (abbreviationCode pointerTypeAbbreviation)
+        [DWARFAttributeData1UnsignedInt 8,
+         DWARFDIECrossReference charCrossReference])
+         
+modifyDWARFDIEOffset :: Int -> CodeTransformation ()
+modifyDWARFDIEOffset n =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     offset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     put state {semanticStateDebugInfo =
+                debugInfo {debugInfoDIEOffset = offset + n}}
 
 addDWARFDIE :: (Int -> DWARFDIE) -> CodeTransformation ()
 addDWARFDIE partialDIE =
@@ -2531,10 +2596,9 @@ addDWARFDIE partialDIE =
      let offset = debugInfoDIEOffset debugInfo
          die = partialDIE offset
          dies = debugInfoDIEs debugInfo
-     liftIO $ putStrLn ("adding DIE with offst " ++ show offset)
      put state {semanticStateDebugInfo =
                   debugInfo {debugInfoDIEs = Map.insert (dwarfDIEKey die) die dies,
-                             debugInfoDIEOffset = dwarfDIECalculateSize die + offset}}
+                             debugInfoDIEOffset = offset + dwarfDIECalculateSize die}}
 
 addDWARFString :: [Char] -> CodeTransformation (Int)
 addDWARFString value =
@@ -2547,6 +2611,56 @@ addDWARFString value =
                                                     debugInfoStringOffset = updatedOffset}}
      return offset
 
+putDWARFVariable :: [Char] -> VariableType -> CodeTransformation ()
+putDWARFVariable name dataType =
+  do abbreviation <- lookupAbbreviation "__ABBREV_VARIABLE"
+     crossReference <- variableTypeToDWARFCrossReference dataType
+     stringOffset <- addDWARFString (removeTypeTag name)
+     
+     addDWARFDIE (dwarfCreateDIE
+                  ("__DIE_VARIABLE_" ++ (removeTypeTag name))
+                  -- (abbreviationCode abbreviation)
+                   abbreviation
+                   0
+                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
+                     DWARFAttributeData2UnsignedInt 0,
+                     DWARFAttributeData4UnsignedInt 88,
+                     DWARFDIECrossReference crossReference])
+
+putDWARFType :: Symbol -> CodeTransformation ()
+putDWARFType customType =
+  do abbreviation <- lookupAbbreviation "__ABBREV_CUSTOM_TYPE"
+     stringOffset <- addDWARFString (removeTypeTag (typeName customType))
+     o <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     addDWARFDIE (dwarfCreateDIE
+                   ("__DIE_CUSTOM_TYPE_" ++ (typeName customType))
+                    abbreviation
+                    0
+                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
+                     DWARFAttributeData4UnsignedInt (8 * fromIntegral (typeSize customType)),
+                     DWARFAttributeData2UnsignedInt 0,
+                     DWARFAttributeData4UnsignedInt 0])
+                     --DWARFAttributeRef4 (fromIntegral (o + 18 + (Map.size (typeSymbols customType) * 19 )))])
+
+     mapM_ (putDWARFTypeField customType) (typeSymbols customType)
+     modifyDWARFDIEOffset 1
+     
+putDWARFTypeField :: Symbol -> Symbol -> CodeTransformation ()
+putDWARFTypeField customType field =
+  do abbreviation <- lookupAbbreviation "__ABBREV_MEMBER"
+     stringOffset <- addDWARFString (removeTypeTag (fieldName field))
+     crossReference <- variableTypeToDWARFCrossReference (fieldType field)
+     liftIO $ putStrLn ("sha la la " ++ fieldName field)
+     addDWARFDIE (dwarfCreateDIE
+                   ("__DIE_CUSTOM_TYPE_FIELD_" ++ (typeName customType) ++ "_" ++ (fieldName field))
+                    abbreviation
+                    1
+                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
+                     DWARFAttributeData2UnsignedInt 0,
+                     DWARFAttributeData4UnsignedInt 0,
+                     DWARFAttributeRef4 (fromIntegral crossReference),
+                     DWARFAttributeData4UnsignedInt (fromIntegral (8 * fieldOffset field))])
+                     
 throwSemanticError :: String -> Statement -> CodeTransformation ()
 throwSemanticError msg (Statement {statementLineNumber = lineNumber,
                                    statementOffset = offset}) =

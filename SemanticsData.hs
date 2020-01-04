@@ -186,7 +186,7 @@ rawAbbreviations =
 
    DWARFAbbreviation
      "__ABBREV_POINTER_TYPE"
-     (dwarfTag "DW_TAG_base_type")
+     (dwarfTag "DW_TAG_pointer_type")
      dwarfNoChildren
      [DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data1"),
       DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4")],
@@ -212,13 +212,13 @@ rawAbbreviations =
      [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
       DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data4"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
-      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4")],
+      --DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
    
    DWARFAbbreviation
      "__ABBREV_MEMBER"
      (dwarfTag "DW_TAG_member")
-     dwarfHasChildren
+     dwarfNoChildren
      [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),

@@ -4309,6 +4309,7 @@ putDebugInfo =
              putDWARFDIEs
              putDWARFStrings
              
+             
      else return ()
      where putSectionHeader (bucket,name) =
              do prevBucket <- getAsmBucket
@@ -4331,11 +4332,10 @@ putCompilationUnitHeader :: CodeTransformation ()
 putCompilationUnitHeader =
   do bucket <- getAsmBucket
      dwarfDIEs <- gets (debugInfoDIEs . compileStateDebugInfo)
+     offset <- gets (debugInfoDIEOffset . compileStateDebugInfo)
      
-     let --unitLength = 7 + (foldr (\dd a -> dwarfDIEAttributesSize dd + (length (uLEB128 (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dd)))) + a) 0 dwarfDIEs)
-         unitLength = 7 + (foldr (\dd a -> dwarfDIECalculateSize dd + a) 0 dwarfDIEs)
-         s = fromJust (Map.lookup "__DIE_VARIABLE_flamingo" dwarfDIEs)
-     --liftIO $ putStrLn ("my size are " ++ show (dwarfDIEAttributesSize s))
+     let unitLength = offset - fromIntegral dwarfCompilationUnitInitialLengthSize + 1 --fromIntegral (dwarfCompilationUnitHeaderSize - dwarfCompilationUnitInitialLengthSize) + offset -- (foldr (\dd a -> dwarfDIECalculateSize dd + a) 0 dwarfDIEs)
+
      setAsmBucket debug_info_
      putAsm ["dd " ++ show unitLength ++ "\n",
              "dw 4\n",
@@ -4431,12 +4431,32 @@ dwarfAttributeToString (DWARFAttributeRefStrp p) = show p
 dwarfAttributeToString (DWARFDIECrossReference i) = show i
 dwarfAttributeToString k = error (show k)
 
+{--
 putDWARFDIE :: DWARFDIE -> CodeTransformation ()
 putDWARFDIE dwarfDIE =
-  do liftIO $ putStrLn ("DIE of offst " ++ show (dwarfDIEOffset dwarfDIE))
+  do --liftIO $ putStrLn ("DIE of offst " ++ show (dwarfDIEOffset dwarfDIE))
      putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dwarfDIE)) ++ "\n"]
      mapM_ putDWARFAttribute (dwarfDIEAttributes dwarfDIE)
-     
+--}
+
+putDWARFDIE :: DWARFDIE -> Int -> CodeTransformation ()
+putDWARFDIE dwarfDIE depth =
+  do liftIO $ putStrLn ("DIE of depth " ++ show (dwarfDIEDepth dwarfDIE))
+     if dwarfDIEDepth dwarfDIE < depth
+     then do return ()
+             putAsm ["db 0;:LALALA\n"]
+             {--state <- get
+             debugInfo <- gets compileStateDebugInfo
+             offset <- gets (debugInfoDIEOffset . compileStateDebugInfo)
+             put state {compileStateDebugInfo =
+                        debugInfo {debugInfoDIEOffset = offset + 1}}
+--}
+             
+             
+     else return ()
+     putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dwarfDIE)) ++ "\n"]
+     mapM_ putDWARFAttribute (dwarfDIEAttributes dwarfDIE)
+
 putDWARFDIEs :: CodeTransformation ()
 putDWARFDIEs =
   do bucket <- getAsmBucket
@@ -4444,10 +4464,20 @@ putDWARFDIEs =
      let dwarfDIEs = map snd (sortBy (comparing (dwarfDIEOffset .snd)) (Map.toAscList rawDIEs))
      
      setAsmBucket debug_info_  
-     mapM_ putDWARFDIE dwarfDIEs
-     
+     putDWARFDIEsLoop dwarfDIEs 0
+     putAsm ["db 0\n"]
      setAsmBucket bucket
 
+putDWARFDIEsLoop :: [DWARFDIE] -> Int -> CodeTransformation ()
+putDWARFDIEsLoop dies depth
+  | length dies > 1 =
+      do putDWARFDIE (head dies) depth
+         putDWARFDIEsLoop (tail dies) (dwarfDIEDepth (head dies))
+  | length dies == 1 =    
+      do putDWARFDIE (head dies) depth
+  | otherwise =
+      do return ()
+  
 putDWARFString :: [Char] -> CodeTransformation ()
 putDWARFString string =
   do putAsm ["db " ++ show string ++ ",0\n"]

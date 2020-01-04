@@ -6,6 +6,9 @@ import Data.Bits
 import Data.Maybe
 import qualified Data.Map as Map
 
+dwarfCompilationUnitHeaderSize = 11
+dwarfCompilationUnitInitialLengthSize = 4
+
 data DWARFAttributeSpec =
   DWARFAttributeSpec
   {
@@ -20,6 +23,8 @@ data DWARFDIE =
   {
     dwarfDIEKey :: [Char],
     dwarfDIEAbbreviationCode :: Int,
+    dwarfDIEDepth :: Int,
+    dwarfDIEHasChildren :: Bool,
     dwarfDIEAttributes :: [DWARFAttribute],
     dwarfDIEAttributesSize :: Int,
     dwarfDIEOffset :: Int
@@ -208,10 +213,10 @@ dwarfAttributeSize (DWARFAttributeRefStrp _) = 4
 dwarfAttributeSize (DWARFDIECrossReference _) = 4
 dwarfAttributeSize k = error (show k)
 
-dwarfCreateDIE :: [Char] -> Int -> [DWARFAttribute] -> (Int -> DWARFDIE)
-dwarfCreateDIE key abbrevCode attributes =
+dwarfCreateDIE :: [Char] -> DWARFAbbreviation -> Int -> [DWARFAttribute] -> (Int -> DWARFDIE)
+dwarfCreateDIE key abbrev depth attributes =
   DWARFDIE
-    key abbrevCode attributes (foldr (\da a -> dwarfAttributeSize da + a) 0 attributes)
+    key (abbreviationCode abbrev) depth (abbreviationHasChildren abbrev) attributes (foldr (\da a -> dwarfAttributeSize da + a) 0 attributes)
 
 dwarfDIECalculateSize :: DWARFDIE -> Int
 dwarfDIECalculateSize die =
