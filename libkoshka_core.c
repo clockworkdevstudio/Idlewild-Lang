@@ -1513,11 +1513,11 @@ void *bb_allocate_array(unsigned long long int **array,void(*init_func)(void*),v
         num_cells *= dimensions[i] + 1;
     }
 
-    *array = malloc(cell_size * num_cells + (dimensionality + 1) * sizeof(unsigned long long int));
+    *array = malloc(cell_size * num_cells + (dimensionality + 2) * sizeof(unsigned long long int));
 
     if(!(*array)) bb_fatal_error("Array allocation failed (out of memory).");
 
-    (*array) += 1 + dimensionality;
+    (*array) += 2 + dimensionality;
 
     if(init_func)
     {
@@ -1525,10 +1525,10 @@ void *bb_allocate_array(unsigned long long int **array,void(*init_func)(void*),v
             (*init_func)(&(*array)[i]);
     }
 
-    (*array)[-1] = cell_size;
+    (*array)[-2] = cell_size;
 
     for(i = 0; i < dimensionality; i++)
-        (*array)[(-i)-2] = dimensions[i] + 1;
+        (*array)[(-i)-3] = dimensions[i] + 1;
 
     va_end(variable_arg_list);
     return (void*)0;
@@ -1544,13 +1544,13 @@ void *bb_access_array(unsigned long long int *array,unsigned long long int dimen
     unsigned long long int subscript;
     int i;
 
-    cell_size = array[-1];
+    cell_size = array[-2];
 
     va_start(variable_arg_list,dimensionality);
     for(i = 0; i < dimensionality; i++)
     {
         subscript = va_arg(variable_arg_list,unsigned long long int);
-        dimension = array[(-i)-2];
+        dimension = array[(-i)-3];
         if(subscript >= dimension)  bb_fatal_error("Array subscript out of bounds.");
         offset += accumulator * subscript;
         accumulator *= dimension;
@@ -1572,16 +1572,17 @@ void bb_deallocate_array(unsigned long long int *array,void(*final_func)(void*),
         if(final_func)
         {
             for(i = 0; i < dimensionality; i++)
-                num_cells *= array[(-i)-2];
+                num_cells *= array[(-i)-3];
 
             for(i = 0; i < num_cells; i++)
                 (*final_func)((void*)array[i]);
         }
 
-        free(array - 1 - dimensionality);
+        free(array - 2 - dimensionality);
     }
 }
 
+/*
 LinkedList *bb_create_linked_list(unsigned long long int element_size,unsigned long long int *string_offsets)
 {
     LinkedList *list;
@@ -1847,6 +1848,274 @@ void bb_delete_each(LinkedList *list)
     list->first = NULL;
     list->last = NULL;
 }
+*/
+
+LinkedList *bb_create_linked_list(unsigned long long int element_size,unsigned long long int *string_offsets)
+{
+    LinkedList *list;
+
+    list = malloc(sizeof(LinkedList));
+    list->first = NULL;
+    list->last = NULL;
+    list->cached = NULL;
+    list->element_size = element_size;
+    list->string_offsets = string_offsets;
+    list->for_each_index = 0;
+    memset(list->for_each_stack,0,sizeof(void*) * BB_MAX_FOR_EACH_STACK);
+    return list;
+}
+
+void bb_destroy_linked_list(LinkedList *list)
+{
+    bb_delete_each(list);
+    free(list);
+}
+
+unsigned long long int bb_new(LinkedList *list)
+{
+    unsigned long long int *element;
+
+    element = malloc(sizeof(unsigned long long int) * (list->element_size + 2));
+    memset(element,0,sizeof(unsigned long long int) * (list->element_size + 2));
+    list->first = g_list_prepend(list->first,(gpointer)(element + 2));
+    *(GList**)(element) = list->first;
+    if(list->last == NULL)
+        list->last = list->first;
+    return (unsigned long long int)list->first->data;
+}
+
+unsigned long long int bb_first(LinkedList *list)
+{
+    if(list->last)
+        return (unsigned long long int)(list->last->data);
+    else
+        return 0;
+}
+
+unsigned long long int bb_last(LinkedList *list)
+{
+    if(list->first)
+        return (unsigned long long int)(list->first->data);
+    else
+        return 0;
+}
+
+unsigned long long int bb_before(unsigned long long int *element)
+{
+    GList *current;
+    GList *previous;
+    current = (GList*)(*(element - 2));
+    previous = g_list_next(current);
+    if(previous != NULL)
+        return (unsigned long long int)previous->data;
+    else
+        return 0;
+}
+
+unsigned long long int bb_after(unsigned long long int *element)
+{
+    GList *current;
+    GList *next;
+    current = (GList*)(*(element - 2));
+    next = g_list_previous(current);
+    if(next != NULL)
+        return (unsigned long long int)next->data;
+    else
+        return 0;
+}
+
+void bb_insert_before(LinkedList *list,unsigned long long int *left_element,unsigned long long int *right_element)
+{
+    GList *left_list;
+    GList *right_list;
+
+    left_list = (GList*)(*(left_element - 2));
+    right_list = (GList*)(*(right_element - 2));
+
+    if(list->for_each_index > 0)
+        (*(list->for_each_stack[list->for_each_index - 1])) = left_list->data;
+
+    if(left_element == right_element)
+        return;
+
+    if(left_list == list->last) //
+        list->last = g_list_previous(left_list); //
+
+    list->first = g_list_remove_link(list->first,left_list);
+    list->first = g_list_insert_before(list->first,g_list_next(right_list),left_list->data);
+    *(((GList**)left_list->data) - 2) = g_list_next(right_list);
+    if(right_list == list->last)
+        list->last = g_list_next(right_list);
+    g_list_free_1(left_list);
+}
+
+void bb_insert_after(LinkedList *list,unsigned long long int *left_element,unsigned long long int *right_element)
+{
+    GList *left_list;
+    GList *right_list;
+
+    left_list = (GList*)(*(left_element - 2));
+    right_list = (GList*)(*(right_element - 2));
+
+    if(list->for_each_index > 0)
+        (*(list->for_each_stack[list->for_each_index - 1])) = left_list->data;
+
+    if(left_element == right_element)
+        return;
+
+    if(left_list == list->last)
+        list->last = g_list_previous(list->last);
+
+    list->first = g_list_remove_link(list->first,left_list);
+    list->first = g_list_insert_before(list->first,right_list,left_list->data);
+    *(((GList**)left_list->data) - 2) = g_list_previous(right_list);
+    g_list_free_1(left_list);
+}
+
+unsigned long long int bb_init_for_each(LinkedList *list,unsigned long long int **element)
+{
+    if(list->for_each_index == BB_MAX_FOR_EACH_STACK - 1)
+        bb_fatal_error("Stack too large.");
+
+    if(list->last == NULL)
+        return 0;
+
+    *element = list->last->data;
+    list->for_each_stack[list->for_each_index] = element;
+    list->for_each_index++;
+
+    return 1;
+}
+
+unsigned long long int bb_next_for_each(LinkedList *list)
+{
+    GList *current;
+    GList *next;
+
+    if(list->for_each_stack[list->for_each_index - 1] == 0)
+    {
+        return 0;
+    }
+
+    if(list->cached)
+    {
+        (*(list->for_each_stack[list->for_each_index - 1])) = list->cached->data;
+        list->cached = NULL;
+        if(!(*(list->for_each_stack[list->for_each_index - 1])))
+        {
+            return 0;
+        }
+
+        current = (GList*) (*((*(list->for_each_stack[list->for_each_index - 1])) - 2));
+
+        if(current == NULL)
+        {
+            return 0;
+        }
+
+        (*(list->for_each_stack[list->for_each_index - 1])) = current->data;
+    }
+    else
+    {
+        if(!(*(list->for_each_stack[list->for_each_index - 1])))
+        {
+            return 0;
+        }
+
+        current = (GList*) (*((*(list->for_each_stack[list->for_each_index - 1])) - 2));
+        next = g_list_previous(current);
+
+        if(next == NULL)
+        {
+            return 0;
+        }
+
+        (*(list->for_each_stack[list->for_each_index - 1])) = next->data;
+    }
+
+    return 1;
+}
+
+void bb_final_for_each(LinkedList *list)
+{
+    list->for_each_stack[list->for_each_index - 1] = 0;
+    list->for_each_index--;
+}
+
+void bb_delete(LinkedList *list,unsigned long long int *element)
+{
+    GList *current;
+    GList *previous;
+    GList *next;
+    GList *iterator;
+
+    if(element == 0)
+        return;
+
+    current = (GList*)(*(element - 2));
+    previous = g_list_next(current);
+    next = g_list_previous(current);
+
+    if(current == list->last && current == list->first)
+    {
+        if(list->for_each_index > 0 && list->for_each_stack[list->for_each_index - 1])
+            (*(list->for_each_stack[list->for_each_index - 1])) = 0;
+        list->first = g_list_remove_link(list->first,current);
+        bb_free_strings((unsigned long long int**)current->data,list->string_offsets);
+        free(((unsigned long long int*)current->data) - 2);
+        g_list_free_1(current);
+        list->first = list->last = list->cached = NULL;
+
+        return;
+    }
+    else
+    {
+        if(list->for_each_index > 0 && list->for_each_stack[list->for_each_index - 1])
+        {
+            if(!(*(list->for_each_stack[list->for_each_index - 1])))
+                list->cached = next;
+            else
+            {
+                iterator = (GList*)(*((*(list->for_each_stack[list->for_each_index - 1])) - 2));
+                if(iterator == current)
+                {
+                    list->cached = next;
+                    (*(list->for_each_stack[list->for_each_index - 1])) = 0;
+                }
+            }
+        }
+
+        list->first = g_list_remove_link(list->first,current);
+
+        if(current == list->last)
+        {
+            list->last = next;
+        }
+        else if(current == list->first)
+        {
+            list->first = previous;
+        }
+        bb_free_strings((unsigned long long int**)current->data,list->string_offsets);
+        free(((unsigned long long int*)current->data) - 2);
+        g_list_free_1(current);
+    }
+}
+
+void bb_delete_each(LinkedList *list)
+{
+    GList *iterator = list->first;
+    GList *next = NULL;
+
+    while(iterator)
+    {
+        next = g_list_next(iterator);
+        bb_delete(list,iterator->data);
+        iterator = next;
+    }
+    list->first = NULL;
+    list->last = NULL;
+}
+
 
 void(*bb_get_free_string())(char*)
 {

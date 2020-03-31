@@ -6,7 +6,7 @@ Idlewild-Lang is a free (as in freedom), general-purpose 64-bit compiler and mul
 DIFFERENCES FROM BLITZ BASIC
 
 - Idlewild-Lang supports 64-bit x86 hosts and targets.
-- Idlewild-Lang is cross-platform.
+- Idlewild-Lang is cross-platform. (IMPORTANT: only the Linux version is currently maintained; this will hopefully change).
 - Idlewild-Lang supports Unicode in all its string functions, including the rendering of Unicode characters with .ttf fonts..
 - Idlewild-Lang supports inline assembly code.
 - Idlewild-Lang's API "libkoshka" is experimental and incomplete.
@@ -52,6 +52,8 @@ Run the following commands:
 
 INSTALL FROM BINARY PACKAGE (WINDOWS)
 
+IMPORTANT: the Windows version has "bit-rotted" (fallen into disrepair) as of March 2020. I don't recommend even trying to compile/run it.
+
 Run the following command from an administrator command prompt:
 
 `install-windows.bat`
@@ -70,7 +72,7 @@ INSTALL FROM SOURCE (LINUX)
 
 To compile and install the language on a (RECENT!) Ubuntu host:
 
-`sudo apt-get install ghc libghc-mtl-dev libglib2.0-dev libgtk-3-dev libsdl2-dev libsdl2-image-2.0-0 libsdl2-image-dev libsdl2-ttf-2.0-0 libsdl2-ttf-dev libsdl2-mixer-2.0-0 libsdl2-mixer-dev freeglut3-dev pkg-config libglew-dev libglm-dev`
+`sudo apt-get install ghc libghc-mtl-dev libglib2.0-dev libgtk-3-dev libsdl2-dev libsdl2-image-2.0-0 libsdl2-image-dev libsdl2-ttf-2.0-0 libsdl2-ttf-dev libsdl2-mixer-2.0-0 libsdl2-mixer-dev libsdl2_gfx libsdl2_gfx-dev pkg-config`
 
 `make linux-release`
 
@@ -80,6 +82,7 @@ To compile and install the language on a (RECENT!) Ubuntu host:
 
 INSTALL FROM SOURCE (WINDOWS)
 
+IMPORTANT: the Windows version has "bit-rotted" (fallen into disrepair) as of March 2020. I don't recommend even trying to compile/run it.
 The same sources used to compile Idlewild-Lang on Linux can be used to build it on Windows. However, you will need to download all the disparate dependencies "manually" from the web. If you're brave enough to try a Windows build, you'll need the following .dlls
 
 freeglut.dll

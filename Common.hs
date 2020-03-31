@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -74,6 +74,7 @@ data CodeState =
        lexStateID :: LexStateID,
        lexStateIncludeFileDepth :: Int,
        lexStateIncludeFileNameStack :: [String],
+       lexStateIncludeFileNames :: [String],
        lexStateCurrentToken :: Token,
        lexStatePendingTokens :: Seq.Seq Token,
        lexStateTokens :: Seq.Seq Token,
@@ -86,6 +87,7 @@ data CodeState =
      ParseState
      {
        parseStateIncludeFileNameStack :: [String],
+       parseStateIncludeFileNames :: [String],
        parseStateTree :: Statement,
        parseStateTokens :: [Token],
        parseStateInFunction :: Bool,
@@ -94,6 +96,9 @@ data CodeState =
      SemanticState
      {
        semanticStateIncludeFileNameStack :: [String],
+       semanticStateLineNumberStack :: [Int],
+       semanticStateIncludeFileNames :: [String],
+       semanticStateCompositeTypeID :: Int,
        semanticStateProgram :: [Statement],
        semanticStateSymbols :: SymbolTable,
        semanticStateLocalSymbols :: SymbolTable,
@@ -109,6 +114,7 @@ data CodeState =
      CompileState
      {
        compileStateIncludeFileNameStack :: [String],
+       compileStateIncludeFileNames :: [String],
        compileStateProgram :: [Statement],
        compileStateAsm :: Asm,
        compileStateSymbols :: SymbolTable,
@@ -121,17 +127,19 @@ data CodeState =
        compileStateExitLabelIDs :: [Int],
        compileStateDebugInfo :: DebugInfo,
        compileStateRegisters :: CPUContext,
-       compileStateLineNumber :: Int,
+       compileStateLineNumberStack :: [Int],
        compileStateLabelID :: Int,
        compileStateConfig :: Config
      } |
      AsmState
      {
        asmStateCode :: [String],
+       asmStateDebugInfo :: DebugInfo,
        asmStateConfig :: Config
      } |
      LinkState
      {
+       linkStateDebugInfo :: DebugInfo,
        linkStateConfig :: Config
      }
      deriving (Show)

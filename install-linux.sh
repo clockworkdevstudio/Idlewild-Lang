@@ -1,15 +1,23 @@
 #!/bin/bash
 
-if [ ! -d "/usr/share/doc/Idlewild-Lang/Examples/" ]; then
-  mkdir "/usr/share/doc/Idlewild-Lang/"
-  mkdir "/usr/share/doc/Idlewild-Lang/Examples/"
+IWL_HOME=$(echo $1 | tr -d '"')
+IWL_LIBS=$(echo $2 | tr -d '"')
+IWL_DOCS=$(echo $3 | tr -d '"')
+
+if [ ! -d $IWL_HOME ]; then
+  mkdir $IWL_HOME
 fi
 
-cp idlewild-lang /usr/bin/
-cp libkoshka.core.so /usr/lib/
-cp libkoshka.mm.so /usr/lib/
-cp nasm /usr/bin/
-cp fasm /usr/bin/
-cp iwls /usr/bin
+if [ ! -d $IWL_DOCS ]; then
+  mkdir $IWL_DOCS
+  mkdir "$IWL_DOCS/Examples/"
+fi
 
-cp Examples/*.bb /usr/share/doc/Idlewild-Lang/Examples/
+cp idlewild-lang $IWL_HOME
+cp libkoshka.core.so $IWL_LIBS
+cp libkoshka.mm.so $IWL_LIBS
+cp nasm $IWL_HOME
+cp fasm $IWL_HOME
+cp iwlls $IWL_HOME
+cp iwldi.asm $IWL_HOME
+cp Examples/*.bb $IWL_DOCS/Examples

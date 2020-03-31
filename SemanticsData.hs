@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -35,25 +35,13 @@ import DWARF
 
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
-{--
-data Reference =
-     LabelReference |
-     TypeReference |
-     FunctionReference
-     {
-       functionReferenceType :: VariableType,
-       functionReferenceArgumentTypes :: [VariableType],
-       functionReferenceMinNumArguments :: Int,
-       functionReferenceMaxNumArguments :: Int
-     }
-     deriving (Show, Eq)
---}
 
 data Parameter =
      Parameter
      {
        parameterName :: String,
        parameterType :: VariableType,
+       parameterIndex :: Int,
        parameterDefaultValue :: Statement
      }
      deriving (Show, Eq)
@@ -63,36 +51,44 @@ data Symbol =
      {
        variableName :: String,
        variableType :: VariableType,
+       variableLineNumber :: Int,
        variableIsGlobal :: Bool
      } |
      LocalAutomaticVariable
      {
        localAutomaticVariableName :: String,
        localAutomaticVariableType :: VariableType,
+       localAutomaticVariableLineNumber :: Int,
        localAutomaticVariableIsArgument :: Bool,
+       localAutomaticVariableIndex :: Int,
        localAutomaticVariableAddress :: Int
      } |
      Const
      {
        constName :: String,
        constType :: VariableType,
+       constLineNumber :: Int,
        constValue :: ConstValue
      } |
      Array
      {
        arrayName :: String,
+       arrayID :: Int,
        arrayType :: VariableType,
+       arrayLineNumber :: Int,
        arrayNumDimensions :: Int
      } |
      Label
      {
-       labelName :: String
+       labelName :: String,
+       labelLineNumber :: Int
      } |
      Function
      {
        functionName :: String,
        functionRawName :: String,
        functionType :: VariableType,
+       --functionLineNumber :: Int,
        functionOrigin :: FunctionOrigin,
        functionParameters :: [Parameter],
        functionMaxNumArguments :: Int,
@@ -106,6 +102,8 @@ data Symbol =
      Type
      {
        typeName :: String,
+       typeID :: Int,
+       typeLineNumber :: Int,
        typeSize :: Int,
        typeSymbols :: SymbolTable
      } |
@@ -113,6 +111,7 @@ data Symbol =
      {
        fieldName :: String,
        fieldType :: VariableType,
+       fieldLineNumber :: Int,
        fieldOffset :: Int
      } |
      NO_NAMESPACE
@@ -132,22 +131,43 @@ data FunctionOrigin =
      deriving (Show,Eq)
 
 type SymbolTable = Map.Map String Symbol
-{--type ForwardReferenceTable = Map.Map String Symbol--}
 type StringTable = Map.Map String Int
 type IntConstantTable = Map.Map Int Int
 type FloatConstantTable = Map.Map Double Int
 
+data DebugAnnotation =
+  DebugAnnotation
+  {
+    debugAnnotationID :: Int,
+    debugAnnotationFileName :: [Char],
+    debugAnnotationLineNumber :: Int
+  }
+  deriving (Show,Eq)
+
 data DebugInfo =
   DebugInfo
   {
-    --debugInfoAbbreviations :: Map.Map [Char] DWARFAbbreviation
     debugInfoStrings :: Seq.Seq [Char],
     debugInfoStringOffset :: Int,
     debugInfoDIEs :: Map.Map [Char] DWARFDIE,
-    debugInfoDIEOffset :: Int
+    debugInfoDIEOffset :: Int,
+    --debugInfoAnnotations :: Map.Map [Char] DebugAnnotation,
+    debugInfoAnnotations :: Seq.Seq DebugAnnotation,
+    debugInfoAnnotationID :: Int,
+    debugInfoLineBase :: Int,
+    debugInfoLineRange :: Int,
+    debugInfoLineNumberProgram :: Seq.Seq DWARFLNInstruction,
+    debugInfoHorrorShow :: HorrorShow
   }
   deriving(Show)
 
+data HorrorShow =
+  HorrorShow
+  {
+    horrorShowCurrentBucketName :: [Char],
+    horrorShowBuckets :: Map.Map [Char] (Seq.Seq [Char])
+  }
+  deriving (Show)
 rawAbbreviations =
   [DWARFAbbreviation
      "__ABBREV_COMPILE_UNIT"
@@ -162,7 +182,7 @@ rawAbbreviations =
       DWARFAttributeSpec (dwarfName "DW_AT_stmt_list") (dwarfForm "DW_FORM_sec_offset")],
       
    DWARFAbbreviation
-     "__ABBREV_SUBPROGRAM"
+     "__ABBREV_FUNCTION"
      (dwarfTag "DW_TAG_subprogram")
      dwarfHasChildren
      [DWARFAttributeSpec (dwarfName "DW_AT_external") (dwarfForm "DW_FORM_flag_present"),
@@ -173,9 +193,28 @@ rawAbbreviations =
       DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
       DWARFAttributeSpec (dwarfName "DW_AT_low_pc") (dwarfForm "DW_FORM_addr"),
       DWARFAttributeSpec (dwarfName "DW_AT_high_pc") (dwarfForm "DW_FORM_data8"),
-      DWARFAttributeSpec (dwarfName "DW_AT_frame_base") (dwarfForm "DW_FORM_exprloc"),
-      DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
+      DWARFAttributeSpec (dwarfName "DW_AT_frame_base") (dwarfForm "DW_FORM_exprloc")],
 
+   DWARFAbbreviation
+     "__ABBREV_PARAMETER"
+     (dwarfTag "DW_TAG_formal_parameter")
+     dwarfNoChildren
+     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_location") (dwarfForm "DW_FORM_exprloc")],
+
+   DWARFAbbreviation
+     "__ABBREV_LOCAL_AUTOMATIC"
+     (dwarfTag "DW_TAG_variable")
+     dwarfNoChildren
+     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_location") (dwarfForm "DW_FORM_exprloc")],
+   
    DWARFAbbreviation
      "__ABBREV_BASE_TYPE"
      (dwarfTag "DW_TAG_base_type")
@@ -213,7 +252,6 @@ rawAbbreviations =
       DWARFAttributeSpec (dwarfName "DW_AT_byte_size") (dwarfForm "DW_FORM_data4"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4")],
-      --DWARFAttributeSpec (dwarfName "DW_AT_sibling") (dwarfForm "DW_FORM_ref4")],
    
    DWARFAbbreviation
      "__ABBREV_MEMBER"
@@ -232,10 +270,19 @@ rawAbbreviations =
      [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
       DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
-      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4")],
-      --DWARFAttributeSpec (dwarfName "DW_AT_external") (dwarfForm "DW_FORM_flag_present"),
-      --DWARFAttributeSpec (dwarfName "DW_AT_declaration") (dwarfForm "DW_FORM_flag_present")],
-   
+      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_location") (dwarfForm "DW_FORM_exprloc")],
+
+   DWARFAbbreviation   
+     "__ABBREV_ARRAY"
+     (dwarfTag "DW_TAG_variable")
+     dwarfNoChildren
+     [DWARFAttributeSpec (dwarfName "DW_AT_name") (dwarfForm "DW_FORM_strp"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_file") (dwarfForm "DW_FORM_data2"),
+      DWARFAttributeSpec (dwarfName "DW_AT_decl_line") (dwarfForm "DW_FORM_data4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_type") (dwarfForm "DW_FORM_ref4"),
+      DWARFAttributeSpec (dwarfName "DW_AT_location") (dwarfForm "DW_FORM_exprloc")],
+      
    DWARFAbbreviation
      "NONE"
      0

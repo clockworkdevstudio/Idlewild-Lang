@@ -1,13 +1,42 @@
+{--
+
+Copyright (c) 2014-2020, Clockwork Dev Studio
+All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are met: 
+
+1. Redistributions of source code must retain the above copyright notice, this
+   list of conditions and the following disclaimer. 
+2. Redistributions in binary form must reproduce the above copyright notice,
+   this list of conditions and the following disclaimer in the documentation
+   and/or other materials provided with the distribution. 
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+--}
+
 module DWARF where
 
 import Data.Int
 import Data.Word
 import Data.Bits
 import Data.Maybe
+import Data.List
 import qualified Data.Map as Map
 
 dwarfCompilationUnitHeaderSize = 11
-dwarfCompilationUnitInitialLengthSize = 4
+dwarfInitialLengthSize = 4
+dwarfLNOpcodeBase = 13 :: Int
 
 data DWARFAttributeSpec =
   DWARFAttributeSpec
@@ -17,13 +46,11 @@ data DWARFAttributeSpec =
   }
   deriving (Show)
 
-
 data DWARFDIE =
   DWARFDIE
   {
     dwarfDIEKey :: [Char],
     dwarfDIEAbbreviationCode :: Int,
-    dwarfDIEDepth :: Int,
     dwarfDIEHasChildren :: Bool,
     dwarfDIEAttributes :: [DWARFAttribute],
     dwarfDIEAttributesSize :: Int,
@@ -32,196 +59,33 @@ data DWARFDIE =
   deriving (Show)
 
 data DWARFAttribute =
-  DWARFAttributeAddr
+  DWARFAttribute1
   {
-    attributeAddr :: Int64
+    dwarfAttribute1Value :: [Char]
   } |
-  DWARFAttributeBlock1
+  DWARFAttribute2
   {
-    attributeBlock1Length :: Word8,
-    attributeBlock1Data :: [Word8]
+    dwarfAttribute2Value :: [Char]
   } |
-  DWARFAttributeBlock2
+  DWARFAttribute4
   {
-    attributeBlock2Length :: Word16,
-    attributeBlock2Data :: [Word8]
+    dwarfAttribute4Value :: [Char]
   } |
-  DWARFAttributeBlock4
+  DWARFAttribute8
   {
-    attributeBlock4Length :: Word32,
-    attributeBlock4Data :: [Word8]
+    dwarfAttribute8Value :: [Char]
   } |
-  DWARFAttributeBlock8
+  DWARFCrossReferenceAttribute
   {
-    attributeBlock8Length :: Word64,
-    attributeBlock8Data :: [Word8]
+    dwarfCrossReferenceAttributeValue :: [Char]
   } |
-  DWARFAttributeBlock
+  DWARFVariableLengthAttribute
   {
-    attributeBlockLength :: DWARFUnsignedLEB128,
-    attributeBlockData :: [Word8]
-  } |
-  DWARFAttributeData1UnsignedInt
-  {
-    attributeData1UInt :: Word8
-  } |
-  DWARFAttributeData1SignedInt
-  {
-    attributeData1Int :: Int8
-  } |
-  DWARFAttributeData2UnsignedInt
-  {
-    attributeData2UInt :: Word16
-  } |
-  DWARFAttributeData2SignedInt
-  {
-    attributeData2Int :: Int16
-  } |
-  DWARFAttributeData4UnsignedInt
-  {
-    attributeData4UInt :: Word32
-  } |
-  DWARFAttributeData4SignedInt
-  {
-    attributeData4Int :: Int32
-  } |
-  DWARFAttributeData4Float
-  {
-    attributeData4Float :: Float
-  } |
-  DWARFAttributeData8UnsignedInt
-  {
-    attributeData8UInt :: Word64
-  } |
-  DWARFAttributeData8SignedInt
-  {
-    attributeData8Int :: Int64
-  } |
-  DWARFAttributeData8Double
-  {
-    attributeData8Double :: Double
-  } |
-  DWARFAttributeDataUnsignedLEB128
-  {
-    attributeDataULEB128 :: DWARFUnsignedLEB128
-  } |
-  DWARFAttributeDataSignedLEB128
-  {
-    attributeDataSLEB128 :: DWARFSignedLEB128
-  } |
-  DWARFAttributeExprLoc
-  {
-  
-  } |
-  DWARFAtttributeFlag
-  {
-    attributeFlag :: Bool
-  } |
-  DWARFAttributeLinePtr
-  {
-    attributeLinePtr :: Int32
-  } |
-  DWARFAttributeLocListPtr
-  {
-    attributeLocListPtr :: Int32
-  } |
-  DWARFAttributeMacPtr
-  {
-    attributeMacPtr :: Int32
-  } |
-  DWARFAttributeRangeListPtr
-  {
-    attributeRangeListPtr :: Int32
-  } |
-  DWARFAttributeRef1
-  {
-    attributeRef1 :: Word8
-  } |
-  DWARFAttributeRef2
-  {
-    attributeRef2 :: Word16
-  } |
-  DWARFAttributeRef4
-  {
-    attributeRef4 :: Word32
-  } |
-  DWARFAttributeRef8
-  {
-    attributeRef8 :: Word64
-  } |
-  DWARFAttributeRefUData
-  {
-    attributeRefUData :: DWARFUnsignedLEB128
-  } |
-  DWARFAttributeRefAddr
-  {
-    attributeRefAddr :: Word32
-  } |
-  DWARFAttributeRefSig8
-  {
-    attributeRefSig8 :: Word64
-  } |
-  DWARFAttributeRefString
-  {
-    attributeRefString :: [Char]
-  } |
-  DWARFAttributeRefStrp
-  {
-    attributeRefStrp :: Word32
-  } |
-  DWARFDIECrossReference
-  {
-    crossReferenceOffset :: Int
+    dwarfVariableLengthAttributeSize :: Int,
+    dwarfVariableLengthAttributeValue :: [Char]
   }
   deriving (Show)
-
-dwarfAttributeSize :: DWARFAttribute -> Int
-dwarfAttributeSize (DWARFAttributeRefStrp _) = 4 
-dwarfAttributeSize (DWARFAttributeAddr _) = 8
-dwarfAttributeSize (DWARFAttributeBlock1 s d) = 1 + (fromIntegral s) * length d
-dwarfAttributeSize (DWARFAttributeBlock2 s d) = 2 + (fromIntegral s) * length d
-dwarfAttributeSize (DWARFAttributeBlock4 s d) = 4 + (fromIntegral s) * length d
-dwarfAttributeSize (DWARFAttributeBlock8 s d) = 8 + (fromIntegral s) * length d
-dwarfAttributeSize (DWARFAttributeBlock s d) = length (uLEB128 s) + decodeUnsignedLEB128 s * length d
-dwarfAttributeSize (DWARFAttributeData1UnsignedInt _) = 1
-dwarfAttributeSize (DWARFAttributeData1SignedInt _) = 1
-dwarfAttributeSize (DWARFAttributeData2UnsignedInt _) = 2
-dwarfAttributeSize (DWARFAttributeData2SignedInt _) = 2
-dwarfAttributeSize (DWARFAttributeData4UnsignedInt _) = 4
-dwarfAttributeSize (DWARFAttributeData4SignedInt _) = 4
-dwarfAttributeSize (DWARFAttributeData4Float _) = 4
-dwarfAttributeSize (DWARFAttributeData8UnsignedInt _) = 8
-dwarfAttributeSize (DWARFAttributeData8SignedInt _) = 8
-dwarfAttributeSize (DWARFAttributeData8Double _) = 8
-dwarfAttributeSize (DWARFAttributeDataUnsignedLEB128 d) = length (uLEB128 d)
---dwarfAttributeSize (DWARFAttributeDataSignedLEB128 _) = 
---dwarfAttributeSize (DWARFAttributeExprLoc) = 0 
-dwarfAttributeSize (DWARFAtttributeFlag _) = 1
-dwarfAttributeSize (DWARFAttributeLinePtr _) = 4
-dwarfAttributeSize (DWARFAttributeLocListPtr _) = 4
-dwarfAttributeSize (DWARFAttributeMacPtr _) = 4
-dwarfAttributeSize (DWARFAttributeRangeListPtr _) = 4
-dwarfAttributeSize (DWARFAttributeRef1 _) = 1
-dwarfAttributeSize (DWARFAttributeRef2 _) = 2
-dwarfAttributeSize (DWARFAttributeRef4 _) = 4
-dwarfAttributeSize (DWARFAttributeRef8 _) = 8
-dwarfAttributeSize (DWARFAttributeRefUData d) = length (uLEB128 d)
-dwarfAttributeSize (DWARFAttributeRefAddr _) = 4
-dwarfAttributeSize (DWARFAttributeRefSig8 _) = 8
-dwarfAttributeSize (DWARFAttributeRefString s) = length s + 1
-dwarfAttributeSize (DWARFAttributeRefStrp _) = 4
-dwarfAttributeSize (DWARFDIECrossReference _) = 4
-dwarfAttributeSize k = error (show k)
-
-dwarfCreateDIE :: [Char] -> DWARFAbbreviation -> Int -> [DWARFAttribute] -> (Int -> DWARFDIE)
-dwarfCreateDIE key abbrev depth attributes =
-  DWARFDIE
-    key (abbreviationCode abbrev) depth (abbreviationHasChildren abbrev) attributes (foldr (\da a -> dwarfAttributeSize da + a) 0 attributes)
-
-dwarfDIECalculateSize :: DWARFDIE -> Int
-dwarfDIECalculateSize die =
-  length (uLEB128 (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode die))) + (foldr (\da a -> dwarfAttributeSize da + a) 0 (dwarfDIEAttributes die))
-  
+    
 data DWARFAbbreviation =
   DWARFAbbreviation
   {
@@ -294,7 +158,100 @@ encodeSignedLEB128 integer =
 uShiftR :: Int -> Int -> Int
 uShiftR n k = fromIntegral (fromIntegral n `shiftR` k :: Word)
 
-    
+unsignedLEB128ToString :: DWARFUnsignedLEB128 -> [Char]
+unsignedLEB128ToString i =
+  intercalate "," (map (("0x" ++) . intToHexString) (map fromIntegral (uLEB128 i)))
+
+signedLEB128ToString :: DWARFSignedLEB128 -> [Char]
+signedLEB128ToString i =
+  intercalate ", " (map (("0x" ++) . intToHexString) (map fromIntegral (sLEB128 i)))
+
+intToHexString :: Int -> [Char]
+intToHexString integer =
+  if isolateRest integer /= 0
+  then  (intToHexString . shiftRight4Bits) integer Prelude.++ (nibbleToHexDigit . isolateNibble) integer
+  else (nibbleToHexDigit . isolateNibble) integer
+  where shiftRight4Bits i = uShiftR i 4
+        isolateNibble i = i .&. 0xF
+        isolateRest i = i .&. 0xFFFFFFFFFFFFFFF0
+        nibbleToHexDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+            2 -> "2"
+            3 -> "3"
+            4 -> "4"
+            5 -> "5"
+            6 -> "6"
+            7 -> "7"
+            8 -> "8"
+            9 -> "9"
+            10 -> "A"
+            11 -> "B"
+            12 -> "C"
+            13 -> "D"
+            14 -> "E"
+            15 -> "F"
+
+intToBinString :: Int -> [Char]
+intToBinString integer =
+  if isolateRest integer /= 0
+  then (intToBinString . shiftRight1Bit) integer Prelude.++ (bitToBinDigit . isolateBit) integer
+  else (bitToBinDigit . isolateBit) integer
+  where shiftRight1Bit i = uShiftR i 1
+        isolateBit i = i .&. 1
+        isolateRest i = i .&. (-2)
+        bitToBinDigit n =
+          case n of
+            0 -> "0"
+            1 -> "1"
+
+data DWARFLNInstruction =
+  DWARFLNSpecial
+  {
+    dwarfLNSpecialOpcode :: Int
+  } |
+  DWARFLNCopy |
+  DWARFLNAdvance
+  {
+    dwarfLNAdvanceID :: Int
+  } |
+  DWARFLNSetFile
+  {
+    dwarfLNSetFile :: [Char]
+  } |
+  DWARFLNSetPrologueEnd |
+  DWARFLNSetEpilogueBegin |
+  DWARFLNEndSequence |
+  DWARFLNSetMainAddress
+  deriving (Show)
+
+data DWARFCFAInstruction =
+  DWARFCFADefCFA
+  {
+    dwarfCFADefCFAReg :: Int,
+    dwarfCFADefCFAOffset :: Int
+  } |
+  DWARFCFADefCFAOffset
+  {
+    dwarfCFADefCFAOffset :: Int
+  } |
+  DWARFCFADefCFARegister
+  {
+    dwarfCFADefCFAReg :: Int
+  } |
+  DWARFCFAOffset
+  {
+    dwarfCFAOffsetReg :: Int,
+    dwarfCFAOffsetFactoredOffset :: Int
+  } |
+  DWARFCFAAdvanceLoc
+  {
+    dwarfCFAdvanceLoc :: [Char]
+  } |
+  DWARFCFANop
+  deriving (Show)
+  
 dwarfTags =
   [(0x1,"DW_TAG_array_type"),
    (0x2,"DW_TAG_class_type"),

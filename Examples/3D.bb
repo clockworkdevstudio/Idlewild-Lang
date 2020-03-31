@@ -4,7 +4,7 @@ Const FLAME_RADIUS = 16
 Const FLAME_CREATE_RATE = 5
 Const SPEED# = 5.0
 Const MAX_NUM_FLAMES = 250
-Const WINDOWED = False
+Const WINDOWED = True
 
 Global NUM_FLAMES = 0
 Global TIMER,PINGS,i
@@ -21,8 +21,7 @@ End Type
 
 SeedRnd Millisecs()
 
-;Graphics 2880, 1800,0, WINDOWED
-Graphics 1024, 768,0, WINDOWED
+Graphics 800,600,0, WINDOWED
 
 Global GRAPHICS_WIDTH = GraphicsWidth()
 Global GRAPHICS_HEIGHT = GraphicsHeight()

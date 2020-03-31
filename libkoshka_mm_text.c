@@ -27,23 +27,6 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdio.h>
 #include <SDL2/SDL_ttf.h>
-
-#if MAC_OS==1
-
-#include <OpenGL/gl.h>
-#include <OpenGL/glu.h>
-#include <OpenGL/glext.h>
-#include <GLUT/glut.h>
-
-#else
-
-#include <GL/glew.h>
-#include <GL/glext.h>
-#include <SDL2/SDL_opengl.h>
-#include <GL/glu.h>
-
-#endif
-
 #include "libkoshka_mm.h"
 
 unsigned long long int bb_drawimage(unsigned long long int image_handle,long long int x,long long int y,unsigned long long int frame);
@@ -52,6 +35,7 @@ extern unsigned long long int BB_COLOR_RED;
 extern unsigned long long int BB_COLOR_GREEN;
 extern unsigned long long int BB_COLOR_BLUE;
 extern unsigned long long int BB_COLOR_ALPHA;
+extern SDL_Renderer *RENDERER;
 
 unsigned long long int draw_text(unsigned long long int image_handle,long long int x,long long int y);
 
@@ -73,7 +57,6 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
 {
     SDL_Surface *surface;
     SDL_Color color;
-    GLuint texture;
     Image *image;
 
     color.r = BB_COLOR_BLUE;
@@ -82,27 +65,16 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
     color.a = BB_COLOR_ALPHA;
 
     surface = TTF_RenderUTF8_Blended(BB_CURRENT_FONT,text,color);
-    glGenTextures(1,&texture);
-    glBindTexture(GL_TEXTURE_2D,texture);
-
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_S,GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_WRAP_T,GL_CLAMP_TO_EDGE);
-
-    glTexImage2D(GL_TEXTURE_2D,0,GL_RGBA,surface->w,surface->h,0,GL_RGBA,GL_UNSIGNED_BYTE,surface->pixels);
-
+    
     image = (Image*)malloc(sizeof(Image));
-    image->textures = (GLuint*)malloc(sizeof(GLuint));
-    image->textures[0] = texture;
     image->surface = surface;
+    image->texture = SDL_CreateTextureFromSurface(RENDERER,image->surface);
     image->width = surface->w;
     image->height = surface->h;
     image->width_frames = 1;
     image->height_frames = 1;
     image->masks = 0;
-    image->auto_destruct = 1;
-
+    
     if(center_x)
     {
         image->handle_x = image->width / 2;
@@ -123,6 +95,9 @@ unsigned long long int bb_text(long long int x,long long int y,char *text,unsign
 
     bb_drawimage((unsigned long long)image,x,y,0);
 
+    SDL_DestroyTexture(image->texture);
+    SDL_FreeSurface(image->surface);
+    free(image);
     return 1;
 }
 

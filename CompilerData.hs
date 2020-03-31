@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -155,16 +155,17 @@ sizeOfShadowSpace = 0
 sizeOfShadowSpace = 4
 #endif
 
-id_ = "10 id"
-directives_ = "20 directives"
-globals_ = "30 globals"
-code_ = "40 code"
-functions_ = "50 functions"
-data_ = "60 data"
-debug_info_ = "70 debug_info"
-debug_abbrev_ = "80 debug_abbrev"
-debug_line_ = "90 debug_line"
-debug_str_ = "95 debug_str"
+id_ = "a id"
+directives_ = "b directives"
+globals_ = "c globals"
+code_ = "d code"
+functions_ = "e functions"
+data_ = "f data"
+debug_info_ = "g debug_info"
+debug_abbrev_ = "h debug_abbrev"
+debug_line_ = "i debug_line"
+debug_str_ = "j debug_str"
+debug_frame_ = "k debug_frame"
 
 data TempStackSpace =
      TempStackSpace

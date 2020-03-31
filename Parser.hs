@@ -1,7 +1,7 @@
 
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -65,14 +65,22 @@ parse =
      program <- gets parseStateTree
      config <- gets parseStateConfig
      includeFileNameStack <- gets parseStateIncludeFileNameStack
+     includeFileNames <- gets parseStateIncludeFileNames
      
-     let options = configOptions config 
-
+     let options = configOptions config
+         horrorShow = (HorrorShow [] (Map.fromAscList [("A_INCLUDES",Seq.empty),
+                                                       ("B_DECLS",Seq.empty),
+                                                       ("C_HSFUNC",Seq.empty),
+                                                       ("D_TYPE_FUNCS",Seq.empty)]))
      if optionAbstractSyntaxTree options
      then do liftIO $ putStr (printAbstractSyntaxTree 0 program)
      else return ()
+     
      put SemanticState
-           {semanticStateIncludeFileNameStack = includeFileNameStack,
+           {semanticStateIncludeFileNameStack = [], --includeFileNameStack,
+            semanticStateIncludeFileNames = includeFileNames,
+            semanticStateLineNumberStack = [],
+            semanticStateCompositeTypeID = 1,
             semanticStateProgram = [program],
             semanticStateSymbols = idlewildLangStandardFunctions,
             semanticStateLocalSymbols =  Map.empty,
@@ -81,7 +89,7 @@ parse =
             semanticStateFloats = Map.empty,
             semanticStateStrings = Map.empty,
             semanticStateNameSpace = NO_NAMESPACE,
-            semanticStateDebugInfo = DebugInfo Seq.empty 0 Map.empty 0,
+            semanticStateDebugInfo = DebugInfo Seq.empty 0 Map.empty 0 Seq.empty 0 0 0 Seq.empty horrorShow,
             semanticStateLoopDepth = 0,
             semanticStateConfig = config}
      
@@ -90,7 +98,9 @@ parserPushIncludeFileName :: String -> CodeTransformation ()
 parserPushIncludeFileName fileName =
   do state <- get
      put $ state {parseStateIncludeFileNameStack =
-                  (fileName:parseStateIncludeFileNameStack state)}
+                  (fileName:parseStateIncludeFileNameStack state),
+                  parseStateIncludeFileNames =
+                  (fileName:parseStateIncludeFileNames state)}
 
 parserPopIncludeFileName :: CodeTransformation ()
 parserPopIncludeFileName =
@@ -268,7 +278,7 @@ parseReturn =
   do inFunction <- gets parseStateInFunction
      if inFunction
      then do token <- popToken
-             value <- anticipateCode (expression 0 [TOKEN_NEWLINE,TOKEN_COLON])
+             value <- anticipateCode (expression 0 [TOKEN_NEWLINE,TOKEN_COLON] infixOperators False)
              if value == EmptyStatement
              then return (createStatement STATEMENT_MULTI_FUNCTION_RETURN token [])
              else return (createStatement STATEMENT_MULTI_FUNCTION_RETURN token [value])
@@ -352,14 +362,14 @@ parseForHeader =
 
         do initToken <- popToken           
            token <- lookToken
-           l <- requireCode (expression 0 [TOKEN_EQUAL_TO]) "Expecting expression."
+           l <- requireCode (expression 0 [TOKEN_EQUAL_TO] infixOperators False) "Expecting expression."
            requireCode (expectToken TOKEN_EQUAL_TO) "Expecting assignment expression." 
            each <- anticipateCode (expectToken TOKEN_EACH)
            if parserSuccess each
            then do r <- requireCode (parseExpression [EXPRESSION_IDENTIFIER]) "Expecting expression."
                    let initialiserStatement = createStatement STATEMENT_EXPRESSION token [createStatement EXPRESSION_ASSIGN token [l,r]]
                    return (createStatement STATEMENT_FOR_EACH_HEADER initToken [initialiserStatement])
-           else do r <- requireCode (expression 0 []) "Expecting assignment expression."
+           else do r <- requireCode (expression 0 [] infixOperators False) "Expecting assignment expression."
                    let initialiserStatement = createStatement STATEMENT_EXPRESSION token [createStatement EXPRESSION_ASSIGN token [l,r]]
 
                    requireCode (expectToken TOKEN_TO) "Expecting 'To'."
@@ -548,7 +558,7 @@ parseExpression :: [StatementID] -> CodeTransformation Statement
 parseExpression ids =
 
         do token <- lookToken
-           expression <- requireCode (expression 0 []) "Expecting expression."
+           expression <- requireCode (expression 0 [] infixOperators False) "Expecting expression."
            if not (null ids || (statementID expression `elem` ids))
            then do token <- lookToken
                    throwParseError "Illegal expression." token
@@ -558,7 +568,7 @@ parseOptionalExpression :: [StatementID] -> TokenID -> CodeTransformation Statem
 parseOptionalExpression ids delimiter =
 
         do token <- lookToken
-           expression <- anticipateCode (expression 0 [delimiter])  
+           expression <- anticipateCode (expression 0 [delimiter] infixOperators False)  
            if expression == EmptyStatement
            then return EmptyStatement
            else if not (null ids || (statementID expression `elem` ids))
@@ -570,7 +580,7 @@ parseExpressionUntil :: TokenID -> [StatementID] -> CodeTransformation Statement
 parseExpressionUntil delimiter ids =
 
         do token <- lookToken
-           expression <- requireCode (expression 0 [delimiter]) "Expecting expression."
+           expression <- requireCode (expression 0 [delimiter] infixOperators False) "Expecting expression."
            if not (null ids || (statementID expression `elem` ids))
            then do token <- lookToken
                    throwParseError "Illegal expression." token
@@ -579,12 +589,12 @@ parseExpressionUntil delimiter ids =
 parseVariableDeclaration :: CodeTransformation Statement
 parseVariableDeclaration =
   do token <- lookToken
-     l <- requireCode (expression 0 [TOKEN_EQUAL_TO]) "Expecting expression."
+     l <- requireCode (expression 0 [TOKEN_EQUAL_TO] infixOperators False) "Expecting expression."
      if statementID l /= EXPRESSION_IDENTIFIER
      then throwParseError "Illegal expression." token
      else do e <- anticipateCode (expectToken TOKEN_EQUAL_TO)
              if parserSuccess e
-             then do r <- requireCode (expression 0 []) "Expecting assignment expression."
+             then do r <- requireCode (expression 0 [] infixOperators False) "Expecting assignment expression."
                      return (createStatement STATEMENT_EXPRESSION token [createStatement EXPRESSION_ASSIGN token [l,r]])    
              else return (createStatement STATEMENT_EXPRESSION token [createStatement EXPRESSION_IDENTIFIER token [IdentifierExpression (tokenValue token)]])    
 
@@ -601,52 +611,13 @@ parseLet :: CodeTransformation Statement
 parseLet =
         do dropToken
            parseTopLevelExpression
-
+           
 parseTopLevelExpression :: CodeTransformation Statement
 parseTopLevelExpression =
         do initToken <- lookToken
-           l <- requireCode (expression 0 (TOKEN_EQUAL_TO:nastyTokenHack)) "Expecting expression."
-           if not (statementID l `elem` writableExpressionTypes)
-           then do throwParseError "Illegal top-level expression." initToken
-           else return EmptyStatement
-           token <- lookToken
-           case tokenID token of
-                TOKEN_EQUAL_TO ->
-                  do dropToken
-                     r <- requireCode (expression 0 []) "Expecting assignment expression."
-                     return (createStatement STATEMENT_EXPRESSION initToken [createStatement EXPRESSION_ASSIGN initToken  [l,r]])
-                TOKEN_LEFT_PARENTHESIS ->
-                  do f <- ambiguousArgumentList initToken l
-                     --trace (show f) (return ())
-                     --trace ("\n\n\n") (return ())
-                     t1 <- lookToken
-                     case tokenID t1 of
-                       TOKEN_EQUAL_TO ->
-                         do dropToken
-                            k <- expression 0 []
-                            let a = (createStatement EXPRESSION_ASSIGN initToken [f,k])
-                                b = (createStatement STATEMENT_EXPRESSION initToken [a])
-                            return b
-                       TOKEN_FIELD_ACCESS ->
-                         do dropToken
-                            m <- expression 0 [TOKEN_EQUAL_TO]
-                            dropToken
-                            k <- expression 0 []
-                            let a = (createStatement EXPRESSION_FIELD_ACCESS initToken [f,m])
-                                b = (createStatement EXPRESSION_ASSIGN initToken [a,k])
-                                c = (createStatement STATEMENT_EXPRESSION initToken [b])
-                            return c
-                       _ -> do r <- expressionLoop 0 f []
-                               --trace (show r) (return ())
-                               let b = (createStatement STATEMENT_EXPRESSION initToken [r])
-                               return b
-                _ -> if statementID l `elem` standaloneExpressionTypes
-                     then return (createStatement STATEMENT_EXPRESSION initToken [l])
-                     else if statementID l == EXPRESSION_IDENTIFIER || statementID l == STATEMENT_END
-                          then do f <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [l]) [TOKEN_NEWLINE,TOKEN_COLON]
-                                  return (createStatement STATEMENT_EXPRESSION initToken [f])
-                          else throwParseError "Illegal top-level expression." initToken
-
+           e <- requireCode (expression 0 [] infixOperatorsR True) "Expecting expression."
+           return (createStatement STATEMENT_EXPRESSION initToken [e])
+           
 getOperatorFromToken :: Token -> [Operator] -> Operator
 getOperatorFromToken (Token {tokenID = id}) opsList =
 
@@ -655,8 +626,8 @@ getOperatorFromToken (Token {tokenID = id}) opsList =
      then Operator TOKEN_NONE STATEMENT_EXPRESSION (-1) ASSOCIATIVITY_LEFT
      else fromJust ct
 
-expression :: Int -> [TokenID] -> CodeTransformation Statement
-expression depth delimiters =
+expression :: Int -> [TokenID] -> [Operator] -> Bool -> CodeTransformation Statement
+expression depth delimiters infixOpsList topLevel  =
 
   do token <- lookToken
      if tokenID token `elem` delimiters
@@ -664,48 +635,63 @@ expression depth delimiters =
      else do let op = getOperatorFromToken token prefixOperators
              if operatorExpressionID op == EXPRESSION_GROUP
              then do g <- groupExpression
-                     expressionLoop depth g []
+                     expressionLoop depth g [] infixOperators False
              else if operatorAssociativity op == ASSOCIATIVITY_RIGHT && operatorPrecedence op >= 0
                   then do dropToken
-                          o <- expression ((operatorPrecedence op) + 1) []
-                          expressionLoop depth (createStatement (operatorExpressionID op) token [o]) []
+                          o <- expression ((operatorPrecedence op) + 1) [] infixOpsList topLevel
+                          expressionLoop depth (createStatement (operatorExpressionID op) token [o]) [] infixOpsList topLevel
                   else do a <- requireCode atom "Expecting expression."
-                          expressionLoop depth a delimiters
+                          t <- lookToken
+                          if tokenID t `elem` ((map operatorTokenID prefixOperators) ++ atomTokenList ++ [TOKEN_INT,TOKEN_FLOAT,TOKEN_STR] ++ [TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE])
+                          then expressionLoop depth a delimiters infixOpsList topLevel
+                          else expressionLoop depth a delimiters infixOpsList False
 
-expressionLoop :: Int -> Statement -> [TokenID] -> CodeTransformation Statement
-expressionLoop depth lhs delimiters =
+expressionLoop :: Int -> Statement -> [TokenID] -> [Operator] -> Bool -> CodeTransformation Statement
+expressionLoop depth lhs delimiters infixOpsList topLevel =
 
   do token <- lookToken
      if tokenID token `elem` delimiters
      then return lhs
-     else do let op = getOperatorFromToken token infixOperators
-             if operatorExpressionID op == EXPRESSION_FUNCTION_CALL
-             then do if operatorPrecedence op < depth
+     else do let op = getOperatorFromToken token infixOpsList 
+                 newInfixOpsList =
+                   if operatorExpressionID op == EXPRESSION_ASSIGN
+                   then infixOperators
+                   else infixOpsList
+             if operatorExpressionID op == EXPRESSION_FUNCTION_CALL || topLevel
+             then do if operatorPrecedence op < depth && not topLevel
                      then do return lhs
                      else do
                              if statementID lhs `elem` typeConversionOperatorList
                              then do token <- popToken
-                                     o <- requireCode (expression 0 [TOKEN_RIGHT_PARENTHESIS]) ("Expecting expression.")
+                                     o <- requireCode (expression 0 [TOKEN_RIGHT_PARENTHESIS] newInfixOpsList False) ("Expecting expression.")
                                      requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis."
-                                     expressionLoop depth (createStatement (statementID lhs) token [o]) delimiters
-                             else do token <- popToken
-                                     f <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [lhs]) [TOKEN_RIGHT_PARENTHESIS]
-                                     requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis."
-                                     expressionLoop depth f delimiters
+                                     expressionLoop depth (createStatement (statementID lhs) token [o]) delimiters newInfixOpsList False
+                             else do if topLevel && operatorExpressionID op /= EXPRESSION_FUNCTION_CALL
+                                     then do t <- lookToken
+                                             if tokenID t `elem` [TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
+                                             then return (createStatement EXPRESSION_FUNCTION_CALL token [lhs])
+                                             else do f <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [lhs]) [TOKEN_RIGHT_PARENTHESIS]
+                                                     expressionLoop depth f delimiters newInfixOpsList False
+                                     
+                                     else do token <- popToken
+                                             f <- argumentList (createStatement EXPRESSION_FUNCTION_CALL token [lhs]) [TOKEN_RIGHT_PARENTHESIS]
+                                             requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis."
+                                             expressionLoop depth f delimiters newInfixOpsList False
+                                     
               else if statementID lhs `elem` typeConversionOperatorList && statementContents lhs == []
                    then throwParseError "Expecting left parenthesis." token
                    else if (operatorAssociativity op == ASSOCIATIVITY_LEFT && operatorPrecedence op > depth) || (operatorAssociativity op == ASSOCIATIVITY_RIGHT && operatorPrecedence op >= depth)
                         then do dropToken
-                                rhs <- expression (operatorPrecedence op) delimiters
+                                rhs <- expression (operatorPrecedence op) delimiters newInfixOpsList False
                                 token <- lookToken
-                                expressionLoop depth (createStatement (operatorExpressionID op) token [lhs, rhs]) delimiters
+                                expressionLoop depth (createStatement (operatorExpressionID op) token [lhs, rhs]) delimiters newInfixOpsList False
                         else do return lhs
 
 groupExpression :: CodeTransformation Statement
 groupExpression =
 
   do token <- popToken
-     c <- expression 0 []
+     c <- expression 0 [] infixOperators False
      requireCode (expectToken TOKEN_RIGHT_PARENTHESIS) "Expecting right parenthesis.3"
      return (createStatement EXPRESSION_GROUP token [c])
 
@@ -713,7 +699,7 @@ partialArgument :: CodeTransformation Statement
 partialArgument =
 
   do token <- popToken
-     c <- expression 0 [TOKEN_RIGHT_PARENTHESIS]
+     c <- expression 0 [TOKEN_RIGHT_PARENTHESIS] infixOperators False
      return c
 
 argumentList :: Statement -> [TokenID] -> CodeTransformation Statement
@@ -722,7 +708,8 @@ argumentList (Statement {statementID = EXPRESSION_FUNCTION_CALL,
                          statementOffset = offset,
                          statementContents = arguments}) delimiters =
 
- do argument <- anticipateCode (expression 0 delimiters)
+ do argument <- anticipateCode (expression 0 delimiters infixOperators False)
+                
     if parserSuccess argument
     then do comma <- anticipateCode (expectToken TOKEN_COMMA)
             if parserSuccess comma
@@ -756,13 +743,8 @@ ambiguousArgumentList token l =
                         do dropToken
                            m <- argumentList j []
                            return m
-                      TOKEN_EQUAL_TO ->
-                        do dropToken
-                           k <- expression 0 [TOKEN_COMMA,TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
-                           let stmt = (createStatement EXPRESSION_ASSIGN token [j,k])
-                           return stmt
                       _ ->
-                        do k <- expressionLoop 0 g [TOKEN_COMMA,TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
+                        do k <- expressionLoop 0 g [TOKEN_COMMA,TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE] infixOperators True
                            t3 <- lookToken
                            if tokenID t3 `elem` [TOKEN_NEWLINE,TOKEN_COLON,TOKEN_END_OF_FILE]
                            then do return  (createStatement EXPRESSION_FUNCTION_CALL token [l,k])

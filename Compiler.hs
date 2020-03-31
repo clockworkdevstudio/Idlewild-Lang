@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -59,6 +59,7 @@ import Data.Maybe
 import qualified Data.Map as Map
 import qualified Data.Sequence as Seq
 import qualified Data.Foldable as Foldable
+import System.IO
 
 putAsm :: [String] -> CodeTransformation ()
 putAsm instructions =
@@ -101,16 +102,7 @@ compile =
            putAsmFileInfo
            putDirectivesAndFunctionDeclarations
            putGlobalData
-           
-           {--
-           b <- getAsmBucket
-           setAsmBucket data_
-           putAsm
-             ["SECTION .data\nBASIC_DATA:\n\n"]
-           putDataSentinel
-           setAsmBucket b
-           --}
-           
+           putBASICDataSection
            putAuxiliaryCode
            
            compileProgram program
@@ -123,14 +115,16 @@ compile =
            putEndFunction
            
            putDebugInfo
+           putHorrorShow
            
            asm <- gets compileStateAsm
            config <- gets compileStateConfig
+           debugInfo <- gets compileStateDebugInfo
            
            let options = configOptions config
                text = (concatMap (Foldable.toList . asmBucketContents . snd) (Map.toAscList (asmBucketMap asm)))
            
-           put (AsmState text config)
+           put (AsmState text debugInfo config)
 
 initialiseCompiler :: CodeTransformation ()
 initialiseCompiler =
@@ -149,6 +143,8 @@ putAsmFileInfo =
      putAsmGeneric
        ["(fasm syntax)\n\n"]
        ["(nasm syntax)\n\n"]
+     putAsm
+       ["%include \"" ++ IWL_HOME ++ "/iwldi.asm\"\n"]
      setAsmBucket bucket
 
 compileProgram :: [Statement] -> CodeTransformation ()
@@ -156,9 +152,18 @@ compileProgram (codeStatement : _) =
 
         do bucket <- getAsmBucket
            setAsmBucket code_
+           debug <- gets (optionDebug . configOptions . compileStateConfig)
            
            putAsmGeneric ["section '.text' executable\n\n"] ["SECTION .text\n\n"]
-
+           
+           if debug
+           then do putAsm ["DBG_MAIN equ $\n"]
+                   id <- compilerNextDebugAnnotationID
+                   putAsmDebugAnnotation 1 id
+                   addDWARFLNInstruction DWARFLNSetMainAddress
+                   addDWARFLNInstruction DWARFLNCopy
+           else return ()
+           
 #if LINUX == 1 || MAC_OS==1
            putAsm
              [osFunctionPrefix ++ "main:\n\n",
@@ -187,10 +192,18 @@ compileProgram (codeStatement : _) =
            putLinkedListInit
 
            compileCode codeStatement
-
+           compileCodeF codeStatement
+           
+           setAsmBucket code_
+           putAsm ["DBG_TEXT_ENDS equ $\n"]
+           
            putLinkedListFinal
            putStandardLibraryFinal
-
+           
+           if debug
+           then addDWARFLNInstruction DWARFLNEndSequence
+           else return ()
+           
            setAsmBucket bucket
 
 putStandardLibraryInit :: CodeTransformation ()
@@ -248,6 +261,18 @@ compilerPopIncludeFileName =
      put $ state {compileStateIncludeFileNameStack =
                   tail (compileStateIncludeFileNameStack state)}
 
+compilerPushLineNumber :: CodeTransformation ()
+compilerPushLineNumber =
+  do state <- get
+     origStack <- gets compileStateLineNumberStack
+     put state {compileStateLineNumberStack = (1:origStack)}
+
+compilerPopLineNumber :: CodeTransformation ()
+compilerPopLineNumber =
+  do state <- get
+     origStack <- gets compileStateLineNumberStack
+     put state {compileStateLineNumberStack = (tail origStack)}
+  
 compileCode :: Statement -> CodeTransformation ()
 compileCode (Statement {statementContents = statements})
 
@@ -289,7 +314,7 @@ compileCode (Statement {statementContents = statements})
                                  STATEMENT_GOTO -> compileGoto
                                  STATEMENT_GOSUB -> compileGosub
                                  STATEMENT_RETURN -> compileReturn
-                                 STATEMENT_MULTI_FUNCTION -> compileMultiFunction
+                                 STATEMENT_MULTI_FUNCTION -> doNothing
                                  STATEMENT_MULTI_FUNCTION_RETURN -> compileMultiFunctionReturn
                                  STATEMENT_CONST -> compileConst
                                  STATEMENT_GLOBAL -> compileGlobal
@@ -305,12 +330,32 @@ compileCode (Statement {statementContents = statements})
 
               doNothing _  = do return ()
 
+compileCodeF :: Statement -> CodeTransformation ()
+compileCodeF (Statement {statementContents = statements})
+
+        | statements == [] =
+            do return ()
+
+        | otherwise =
+
+            do compileFunc statement
+               compileCodeF (createMinimalStatement STATEMENT_CODE (tail statements))
+
+        where statement = head statements
+              compileFunc = case statementID statement of
+                                 STATEMENT_MULTI_FUNCTION -> compileMultiFunction
+                                 STATEMENT_MULTI_FUNCTION_RETURN -> compileMultiFunctionReturn
+                                 _ -> doNothing
+
+              doNothing _  = do return ()
+
 compileNothing :: Statement -> CodeTransformation ()
 compileNothing _ = do return ()
 
 compileInsert :: Statement -> CodeTransformation ()
 compileInsert (Statement {statementID = id,
-                            statementContents = (object:expression:_)}) =
+                            statementContents = (object:expression:_),
+                            statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -320,6 +365,8 @@ compileInsert (Statement {statementID = id,
          expressionType = getExpressionType expression symbols localSymbols types
          name = map toLower (customTypeName objectType)
 
+     putDebugAnnotation lineNumber
+     
      setDataType objectType
      compileExpression object
      leftRegister <- gets currentRegister
@@ -343,6 +390,7 @@ compileInsert (Statement {statementID = id,
         RawRegister (registerName r3) VARIABLE_TYPE_INT]
 
      deallocateRegisters [leftRegister,rightRegister]
+     resetRegisterState
 
   where insertFunctionName =
           case id of
@@ -350,7 +398,8 @@ compileInsert (Statement {statementID = id,
             STATEMENT_INSERT_AFTER -> "insert_after"
 
 compileDelete :: Statement -> CodeTransformation ()
-compileDelete (Statement {statementContents = (expression:_)}) =
+compileDelete (Statement {statementContents = (expression:_),
+                          statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -359,6 +408,8 @@ compileDelete (Statement {statementContents = (expression:_)}) =
      let dataType = getExpressionType expression symbols localSymbols types
          name = map toLower (customTypeName dataType)
 
+     putDebugAnnotation lineNumber
+     
      setDataType dataType
      compileExpression expression
      result <- gets currentRegister
@@ -378,7 +429,8 @@ compileDelete (Statement {statementContents = (expression:_)}) =
 
 compileDeleteEach :: Statement -> CodeTransformation ()
 compileDeleteEach (Statement {statementID = STATEMENT_DELETE_EACH,
-                            statementContents = (Statement {statementContents = typeName:_}:_)}) =
+                              statementContents = (Statement {statementContents = typeName:_}:_),
+                              statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -387,7 +439,9 @@ compileDeleteEach (Statement {statementID = STATEMENT_DELETE_EACH,
      let sourceName = identifierExpressionValue (getInitialStatement typeName)
          name = map toLower sourceName
          type_ = Map.lookup name types
-                 
+     
+     putDebugAnnotation lineNumber
+     
      r1 <- reserveRegisterForFunctionCallWithPreference (functionCallRegisters !! 0)
      
      putAsm
@@ -398,20 +452,37 @@ compileDeleteEach (Statement {statementID = STATEMENT_DELETE_EACH,
 
 compileBeginningOfFile :: Statement -> CodeTransformation ()
 compileBeginningOfFile (Statement {statementContents = (IdentifierExpression fileName:_)}) =
-  do compilerPushIncludeFileName fileName
+  do debug <- gets (optionDebug . configOptions . compileStateConfig)
+     compilerPushIncludeFileName fileName
+     compilerPushLineNumber
+     if debug
+     then do stack <- gets compileStateIncludeFileNameStack
+             if length stack > 1
+             then addDWARFLNInstruction (DWARFLNSetFile fileName)
+             else return ()
+     else return ()
 
 compileEndOfFile :: Statement -> CodeTransformation ()
 compileEndOfFile _ =
-  do compilerPopIncludeFileName
+  do debug <- gets (optionDebug . configOptions . compileStateConfig)
+     fileNameStack <- gets compileStateIncludeFileNameStack
+     compilerPopIncludeFileName
+     compilerPopLineNumber
+     
+     if debug && fileNameStack /= []
+     then do let fileName = head fileNameStack
+             addDWARFLNInstruction (DWARFLNSetFile fileName)
+     else return ()
      
 compileNewLine :: Statement -> CodeTransformation ()
 compileNewLine _ = do resetRegisterState
-                      compilerIncrementLineNumber
+                      compilerNextLineNumber
 
 compileDimStatement :: Statement -> CodeTransformation ()
-compileDimStatement (Statement {statementContents = expressionList}) =
+compileDimStatement (Statement {statementContents = expressionList,statementLineNumber = lineNumber}) =
         
-        do mapM_ compileDim expressionList
+        do putDebugAnnotation lineNumber
+           mapM_ compileDim expressionList
 
 compileDim :: Statement -> CodeTransformation ()
 compileDim arrayDeclaration =
@@ -419,12 +490,12 @@ compileDim arrayDeclaration =
         do symbols <- gets compileStateSymbols
            localSymbols <- gets compileStateLocalSymbols
            nameSpace <- gets compileStateNameSpace
-           lineNumber <- gets compileStateLineNumber
-
+           lineNumber <- gets (head . compileStateLineNumberStack)
+           
            let (identifier,dimensions) = getFunctionCallOperands (statementContents (getInitialStatement arrayDeclaration))
                sourceName = identifierExpressionValue (getInitialStatement identifier)
                name = removeTypeTag (map toLower sourceName)
-               (Array {arrayType = (VARIABLE_TYPE_ARRAY arrayType)}) = lookupVariable name symbols localSymbols nameSpace
+               (Array {arrayType = (VARIABLE_TYPE_ARRAY arrayType), arrayID = id}) = lookupVariable name symbols localSymbols nameSpace
            
            if arrayType == VARIABLE_TYPE_STRING
 #if LINUX==1 || MAC_OS==1
@@ -454,7 +525,11 @@ compileDim arrayDeclaration =
                       RawRegister (registerName r3) VARIABLE_TYPE_INT,
                       createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 8],
                       createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (length dimensions)]] ++ dimensions)
-
+                      
+                   putAsm
+                     ["mov " ++ registerName r1 ++ ", [" ++ decorateVariableName name symbols localSymbols nameSpace ++ "]\n",
+                      "mov qword [" ++ registerName r1 ++ " - 8], " ++ show id ++ "\n"]
+          
            else do r1 <- reserveRegisterForFunctionCallWithPreference (functionCallRegisters !! 0)
                    putAsm
                      ["mov " ++ registerName r1 ++ ", " ++ decorateVariableName name symbols localSymbols nameSpace ++ "\n"]
@@ -465,7 +540,10 @@ compileDim arrayDeclaration =
                       createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 0],
                       createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 8],
                       createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (length dimensions)]] ++ dimensions)
-
+                      
+                   putAsm
+                     ["mov " ++ registerName r1 ++ ", [" ++ decorateVariableName name symbols localSymbols nameSpace ++ "]\n",
+                      "mov qword [" ++ registerName r1 ++ " - 8], " ++ show id ++ "\n"]
            resetRegisterState
 
 compileEndStatement :: Statement -> CodeTransformation ()
@@ -494,8 +572,9 @@ compileSys :: Statement -> CodeTransformation ()
 compileSys _ = do return ()
 
 compileTopLevelExpression :: Statement -> CodeTransformation ()
-compileTopLevelExpression (Statement {statementContents = (statement:_)}) =
-        do if expressionIsFunctionCall statement
+compileTopLevelExpression (Statement {statementContents = (statement:_),statementLineNumber = lineNumber}) =
+        do putDebugAnnotation lineNumber
+           if expressionIsFunctionCall statement
            then do compileTopLevelFunctionCall statement
                    register <- gets currentRegister
                    symbols <- gets compileStateSymbols
@@ -512,7 +591,8 @@ compileTopLevelExpression (Statement {statementContents = (statement:_)}) =
            else do compileReducedExpression statement
 
 compileTopLevelFunctionCall (Statement {statementID = EXPRESSION_FUNCTION_CALL, 
-                                     statementContents = (operand:arguments)}) =
+                                     statementContents = (operand:arguments),
+                                     statementLineNumber = lineNumber}) =
 
         do dataType <- gets getDataType
            symbols <- gets compileStateSymbols
@@ -522,7 +602,6 @@ compileTopLevelFunctionCall (Statement {statementID = EXPRESSION_FUNCTION_CALL,
                name = removeTypeTag (map toLower sourceName)
                symbol = lookupVariable name symbols Map.empty NO_NAMESPACE
                parameters = functionParameters symbol
-           
            insertFunctionCall name (arguments ++ populateDefaultValues parameters)
 
 populateDefaultValues :: [Parameter] -> [Statement]
@@ -591,9 +670,11 @@ putData statement =
                        ["dq DATA_TYPE_STRING, SC" ++ show stringID ++ "\n"]
 
 compileRead :: Statement -> CodeTransformation ()
-compileRead (Statement {statementContents = variableList}) =
+compileRead (Statement {statementContents = variableList,
+                        statementLineNumber = lineNumber}) =
 
-        do mapM_ putRead variableList
+        do putDebugAnnotation lineNumber
+           mapM_ putRead variableList
 
 putRead :: Statement -> CodeTransformation ()
 putRead (Statement {statementContents = (statement:_)}) =
@@ -621,9 +702,7 @@ putReadToVariable statement symbols localSymbols nameSpace =
            case lookupVariable name symbols localSymbols nameSpace of
              (Variable {variableType = type_}) -> type_
              (LocalAutomaticVariable {localAutomaticVariableType = type_}) -> type_
-
-     anticipateFatalError statement
-
+             
      case dataType of
 
        VARIABLE_TYPE_INT ->
@@ -675,9 +754,7 @@ putReadToArray (identifier,arguments) symbols localSymbols nameSpace =
   do let sourceName = identifierExpressionValue (getInitialStatement identifier)
          name = removeTypeTag (map toLower sourceName)
          (Array {arrayType = (VARIABLE_TYPE_ARRAY dataType)}) = lookupVariable name symbols localSymbols nameSpace
-                     
-     anticipateFatalError identifier
-                     
+                                
      case dataType of
 
        VARIABLE_TYPE_INT ->
@@ -785,34 +862,24 @@ putReadToField expression symbols localSymbols nameSpace =
                RawRegister (registerName r2) VARIABLE_TYPE_INT]
 
 compileRestore :: Statement -> CodeTransformation ()
-compileRestore (Statement {statementContents = (expression:_)}) =
+compileRestore (Statement {statementContents = (expression:_),
+                           statementLineNumber = lineNumber}) =
 
         do let sourceName = identifierExpressionValue (getInitialStatement expression)
-               name = map toLower sourceName
+               name = sourceName
            symbols <- gets compileStateSymbols
            localSymbols <- gets compileStateLocalSymbols
            nameSpace <- gets compileStateNameSpace
+           putDebugAnnotation lineNumber
            r1 <- reserveRegisterForFunctionCallWithPreference (functionCallRegisters !! 0)
            putAsm
              ["mov " ++ registerName r1 ++ ", BASIC_DATA." ++ name ++ "\n"]
            insertFunctionCall "restore"
              [RawRegister (registerName r1) VARIABLE_TYPE_INT]
 
-anticipateFatalError :: Statement -> CodeTransformation ()
-anticipateFatalError statement =
-  do debug <- gets (optionDebug . configOptions . compileStateConfig)
-     sourceFileName <- gets (configSourceFileName . compileStateConfig)
-     symbols <- gets compileStateSymbols
-     localSymbols <- gets compileStateLocalSymbols
-     if debug
-     then do insertFunctionCall "anticipate_fatal_error"
-               [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression ("\"" ++ sourceFileName ++ "\"")],
-                createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (statementLineNumber statement)],
-                createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression (statementOffset statement)]]
-     else return ()
-
 compileFor :: Statement -> CodeTransformation ()
-compileFor (Statement {statementContents = statements}) =
+compileFor (Statement {statementContents = statements,
+                       statementLineNumber = lineNumber}) =
 
         do symbols <- gets compileStateSymbols
            localSymbols <- gets compileStateLocalSymbols
@@ -861,6 +928,8 @@ compileFor (Statement {statementContents = statements}) =
 
                   putAsm
                     [generateLabelName startLabelID ++ ":\n\n"]
+                    
+                  putDebugAnnotation lineNumber
 
                   setDataType VARIABLE_TYPE_INT
                   compileExpression leftOperand
@@ -927,6 +996,8 @@ compileFor (Statement {statementContents = statements}) =
                   putAsm
                     [generateLabelName startLabelID ++ ":\n\n"]
 
+                  putDebugAnnotation lineNumber
+                  
                   setDataType VARIABLE_TYPE_FLOAT
                   compileExpression leftOperand
 
@@ -981,7 +1052,8 @@ compileFor (Statement {statementContents = statements}) =
                   removeExitLabelID
 
 compileForEach :: Statement -> CodeTransformation ()
-compileForEach (Statement {statementContents = statements}) =
+compileForEach (Statement {statementContents = statements,
+                           statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -1026,6 +1098,8 @@ compileForEach (Statement {statementContents = statements}) =
      putAsm
        [generateLabelName startLabelID ++ ":\n\n"]
      
+     putDebugAnnotation lineNumber
+     
      compileCode code
      
      r1 <- reserveRegisterForFunctionCallWithPreference (functionCallRegisters !! 0)
@@ -1061,7 +1135,8 @@ compileForEach (Statement {statementContents = statements}) =
      removeExitLabelID
 
 compileWhile :: Statement -> CodeTransformation ()
-compileWhile (Statement {statementContents = (condition:code:_)}) =
+compileWhile (Statement {statementContents = (condition:code:_),
+                         statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -1077,6 +1152,8 @@ compileWhile (Statement {statementContents = (condition:code:_)}) =
      putAsm
        [generateLabelName whileLabelID ++ ":\n\n"]
 
+     putDebugAnnotation lineNumber
+     
      setDataType VARIABLE_TYPE_INT
      compileExpression condition
      register <- gets currentRegister
@@ -1096,7 +1173,8 @@ compileWhile (Statement {statementContents = (condition:code:_)}) =
      removeExitLabelID
 
 compileRepeat :: Statement -> CodeTransformation ()
-compileRepeat (Statement {statementContents = (code:footer:_)}) =
+compileRepeat (Statement {statementContents = (code:footer:_),
+                          statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -1116,7 +1194,9 @@ compileRepeat (Statement {statementContents = (code:footer:_)}) =
 
      putAsm
        [generateLabelName repeatLabelID ++ ":\n\n"]
-
+     
+     putDebugAnnotation lineNumber
+     
      compileCode code
 
      if forever
@@ -1147,17 +1227,20 @@ removeExitLabelID =
 compileExit :: Statement -> CodeTransformation ()
 compileExit statement =
   do exitLabelID <- gets (head . compileStateExitLabelIDs)
+     putDebugAnnotation (statementLineNumber statement)
      putAsm
        ["jmp " ++ generateLabelName exitLabelID ++ "\n\n"]
 
 compileIf :: Statement -> CodeTransformation ()
-compileIf (Statement {statementContents = (Statement {statementContents = (expression:code:_)}:rest)}) =
+compileIf (Statement {statementContents = (Statement {statementContents = (expression:code:_),statementLineNumber = lineNumber}:rest)}) =
 
         do nextLabelID
            escapeLabelID <- gets compileStateLabelID
            nextLabelID
            skipLabelID <- gets compileStateLabelID
-
+           
+           putDebugAnnotation lineNumber
+           
            setDataType VARIABLE_TYPE_INT
            compileExpression expression
            register <- gets currentRegister
@@ -1187,6 +1270,8 @@ compileElseStatements escapeLabelID (statement:rest) =
 
                nextLabelID
                skipLabelID <- gets compileStateLabelID
+               
+               putDebugAnnotation (statementLineNumber statement)
 
                setDataType VARIABLE_TYPE_INT
                compileExpression expression
@@ -1221,7 +1306,8 @@ restoreCPUContext cpuContext =
      put state {compileStateRegisters = cpuContext}
     
 compileSelect :: Statement -> CodeTransformation ()
-compileSelect (Statement {statementContents = (expression:rest)}) =
+compileSelect (Statement {statementContents = (expression:rest),
+                          statementLineNumber = lineNumber}) =
 
   do symbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
@@ -1231,6 +1317,8 @@ compileSelect (Statement {statementContents = (expression:rest)}) =
      escapeLabelID <- gets compileStateLabelID
      let dataType = getExpressionType expression symbols localSymbols types
 
+     putDebugAnnotation lineNumber
+     
      setDataType dataType
      compileExpression expression
 
@@ -1260,6 +1348,8 @@ compileIntCaseStatements prevCPUContext selectRegister escapeLabelID (statement:
                
                cpuContext <- gets compileStateRegisters
                restoreCPUContext prevCPUContext
+               
+               putDebugAnnotation (statementLineNumber statement)
 
                setDataType VARIABLE_TYPE_INT
                compileExpression expression
@@ -1298,6 +1388,8 @@ compileFloatCaseStatements prevCPUContext escapeLabelID (statement:rest) =
                
                cpuContext <- gets compileStateRegisters
                restoreCPUContext prevCPUContext
+               
+               putDebugAnnotation (statementLineNumber statement)
 
                setDataType VARIABLE_TYPE_FLOAT
                compileExpression expression
@@ -1341,6 +1433,8 @@ compileStringCaseStatements prevCPUContext selectRegister escapeLabelID (stateme
                
                cpuContext <- gets compileStateRegisters
                restoreCPUContext prevCPUContext
+               
+               putDebugAnnotation (statementLineNumber statement)
 
                setDataType VARIABLE_TYPE_STRING
                compileExpression expression
@@ -1471,15 +1565,14 @@ compileLabel :: Statement -> CodeTransformation ()
 compileLabel statement =
 
         do let (IdentifierExpression {identifierExpressionValue = sourceName}) = getInitialStatement statement
-               name = map toLower sourceName
            putAsm
-             [decorateLabelName (tail name) ++ ":\n\n"]
+             [decorateLabelName (tail sourceName) ++ ":\n\n"]
 
 compileDataLabel :: Statement -> CodeTransformation ()
 compileDataLabel statement =
 
         do let (IdentifierExpression {identifierExpressionValue = sourceName}) = getInitialStatement statement
-               name = map toLower sourceName
+               name = sourceName
            bucket <- getAsmBucket
            setAsmBucket data_
            putAsm
@@ -1487,7 +1580,8 @@ compileDataLabel statement =
            setAsmBucket bucket
 
 compileOnGoto :: Statement -> CodeTransformation ()
-compileOnGoto (Statement {statementContents = (predicate:destinations)}) =
+compileOnGoto (Statement {statementContents = (predicate:destinations),
+                          statementLineNumber = lineNumber}) =
         do let numDestinations = length destinations
                
            bucket <- getAsmBucket
@@ -1503,7 +1597,9 @@ compileOnGoto (Statement {statementContents = (predicate:destinations)}) =
            mapM_ putJumpTableElement destinations              
            
            setAsmBucket bucket
-          
+           
+           putDebugAnnotation lineNumber
+           
            setDataType VARIABLE_TYPE_INT
            compileExpression predicate
            register <- gets currentRegister
@@ -1522,22 +1618,22 @@ compileOnGoto (Statement {statementContents = (predicate:destinations)}) =
               "add " ++ registerName register ++ ", JT" ++ (show jumpTableLabelID) ++ "\n",
               "jmp " ++ " qword [" ++ registerName register ++ "]\n"]
            
+           {--
            putAsm
              ["jmp " ++ generateLabelName skipLabelID ++ "\n"] 
            putAsm
              [generateLabelName errorLabelID ++ ":\n"]
-             
-           anticipateFatalError (head destinations)
              
            insertFunctionCall "fatal_error"
              [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression runtimeErrorOnGotoRangeException]]
 
            putAsm
              [generateLabelName skipLabelID ++ ":\n"]
-
+--}
 
 compileOnGosub :: Statement -> CodeTransformation ()
-compileOnGosub (Statement {statementContents = (predicate:destinations)}) =
+compileOnGosub (Statement {statementContents = (predicate:destinations),
+                           statementLineNumber = lineNumber}) =
         do symbols <- gets compileStateSymbols
            localSymbols <- gets compileStateLocalSymbols
            nameSpace <- gets compileStateNameSpace
@@ -1557,7 +1653,9 @@ compileOnGosub (Statement {statementContents = (predicate:destinations)}) =
            mapM_ putJumpTableElement destinations              
            
            setAsmBucket bucket
-          
+           
+           putDebugAnnotation lineNumber
+           
            setDataType VARIABLE_TYPE_INT
            compileExpression predicate
            register <- gets currentRegister
@@ -1590,21 +1688,18 @@ compileOnGosub (Statement {statementContents = (predicate:destinations)}) =
 
            putAsm
              [generateLabelName returnLabelID ++ ":\n"]
-
+{--
            putAsm
              ["jmp " ++ generateLabelName skipLabelID ++ "\n"] 
            putAsm
              [generateLabelName errorLabelID ++ ":\n"]
-             
-           anticipateFatalError (head destinations)
              
            insertFunctionCall "fatal_error"
              [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression runtimeErrorOnGotoRangeException]]
 
            putAsm
              [generateLabelName skipLabelID ++ ":\n"]
-
-
+--}
 putJumpTableElement :: Statement -> CodeTransformation ()
 putJumpTableElement statement =
   
@@ -1629,9 +1724,9 @@ compileGoto statement =
 
         do let (Statement {statementContents = (destination:_)}) = getInitialStatement statement
                sourceName = identifierExpressionValue destination
-               name = map toLower sourceName
+               name = sourceName
            putAsm
-             ["jmp " ++ decorateLabelName name ++ "\n\n"]
+             ["jmp " ++ decorateLabelName sourceName ++ "\n\n"]
 
 compileGosub :: Statement -> CodeTransformation ()
 compileGosub statement =
@@ -1642,9 +1737,7 @@ compileGosub statement =
      
      let (Statement {statementContents = (destination:_)}) = getInitialStatement statement
          sourceName = identifierExpressionValue destination
-         name = map toLower sourceName
-
-     anticipateFatalError statement
+         name = sourceName
      
      nextLabelID
      returnLabelID <- gets compileStateLabelID
@@ -1664,7 +1757,7 @@ compileGosub statement =
 
 compileReturn :: Statement -> CodeTransformation ()
 compileReturn statement =
-  do anticipateFatalError statement
+  do putDebugAnnotation (statementLineNumber statement)
      insertFunctionCall "final_gosub" []
      register <- gets currentRegister
      putAsm
@@ -1677,13 +1770,15 @@ setCompileStateNameSpace symbol =
 
 #if LINUX==1 || MAC_OS==1
 compileMultiFunction :: Statement -> CodeTransformation ()
-compileMultiFunction  (Statement {statementContents = statements}) =
+compileMultiFunction  (Statement {statementContents = statements,
+                                  statementLineNumber = lineNumber}) =
 
         do globalSymbols <- gets compileStateSymbols
+           debug <- gets (optionDebug . configOptions . compileStateConfig)
            bucket <- getAsmBucket
-
+           
            setAsmBucket functions_
-
+           
            let (Statement {statementContents = (identifier:_)}:_:definition:_) = statements
                sourceName = identifierExpressionValue (getInitialStatement identifier)
                name = removeTypeTag (map toLower sourceName)
@@ -1764,11 +1859,30 @@ compileMultiFunction  (Statement {statementContents = statements}) =
            
            putAsm
              [(decorateUserFunctionName (removeTypeTag name)) ++ ":\n\n"]
-
+             
+           if debug
+           then do putAsm
+                     ["DBG_BEGIN_" ++ (decorateUserFunctionName (removeTypeTag name)) ++ " equ $\n"]
+           else return ()
+           
            putAsm
-             ["push rbp\n",
-              "mov rbp, rsp\n",
-              "push rbx\n",
+             ["push rbp\n"]
+             
+           if debug
+           then do putAsm
+                     ["DBG_STORED_FRAME_POINTER_" ++ (decorateUserFunctionName (removeTypeTag name)) ++ " equ $\n"]
+           else return ()
+           
+           putAsm
+              ["mov rbp, rsp\n"]
+              
+           if debug
+           then do putAsm
+                     ["DBG_SETUP_FRAME_" ++ (decorateUserFunctionName (removeTypeTag name)) ++ " equ $\n"]
+           else return ()
+              
+           putAsm
+             ["push rbx\n",
               "push r12\n",
               "push r13\n",
               "push r14\n",
@@ -1811,7 +1925,9 @@ compileMultiFunction  (Statement {statementContents = statements}) =
 
            localSymbols <- getLocalSymbols
            setLocalSymbols (functionSymbols function)
-
+           
+           --putDebugAnnotation lineNumber
+           
            compileCode definition
 
            case functionType function of
@@ -1853,6 +1969,11 @@ compileMultiFunction  (Statement {statementContents = statements}) =
               "pop r12\n",
               "pop rbx\n",
               "pop rbp\n"]
+              
+           if debug
+           then putAsm
+                  ["DBG_DESTROYED_FRAME_" ++ (decorateUserFunctionName (removeTypeTag name)) ++ " equ $\n"]
+           else return ()
 
            putAsm
               ["ret\n\n"]
@@ -1864,17 +1985,25 @@ compileMultiFunction  (Statement {statementContents = statements}) =
              
            putAsm
              ["ret\n\n"]
-
+              
+           if debug
+           then putAsm
+                  ["DBG_END_" ++ (decorateUserFunctionName (removeTypeTag name)) ++ " equ $\n"]
+           else return ()
+           
            setAsmBucket bucket
            setCompileStateNameSpace originalNameSpace
 
 compileMultiFunctionReturn :: Statement -> CodeTransformation ()
-compileMultiFunctionReturn Statement {statementContents = expression:_} =
+compileMultiFunctionReturn Statement {statementContents = expression:_,
+                                      statementLineNumber = lineNumber} =
 
   do globalSymbols <- gets compileStateSymbols
      localSymbols <- gets compileStateLocalSymbols
      function <- gets compileStateNameSpace
 
+     putDebugAnnotation lineNumber
+     
      setDataType (functionType function)
      compileExpression expression
      case functionType function of
@@ -1943,9 +2072,11 @@ compileMultiFunctionReturn Statement {statementContents = expression:_} =
      putAsm
        ["ret\n\n"]
 
-compileMultiFunctionReturn _ =
+compileMultiFunctionReturn (Statement {statementLineNumber = lineNumber}) =
   do function <- gets compileStateNameSpace
-
+  
+     putDebugAnnotation lineNumber
+     
      case functionType function of
 
        VARIABLE_TYPE_INT ->
@@ -2313,8 +2444,12 @@ compileConst _ =
   do return ()
 
 compileGlobal :: Statement -> CodeTransformation ()
-compileGlobal  Statement {statementContents = expressionList} =
-  do mapM_ compileGlobalVariableDeclaration expressionList
+compileGlobal  Statement {statementContents = expressionList,
+                          statementLineNumber = lineNumber} =
+  do if any (\e -> statementID ((head . statementContents) e) == EXPRESSION_ASSIGN) expressionList
+     then do putDebugAnnotation lineNumber
+     else return ()
+     mapM_ compileGlobalVariableDeclaration expressionList
      
 compileGlobalVariableDeclaration :: Statement -> CodeTransformation ()
 compileGlobalVariableDeclaration Statement {statementContents = (expression:_)} =
@@ -2323,13 +2458,18 @@ compileGlobalVariableDeclaration Statement {statementContents = (expression:_)} 
      else return ()
 
 compileLocal :: Statement -> CodeTransformation ()
-compileLocal  Statement {statementContents = expressionList} =
-  do mapM_ compileLocalAutomaticVariableDeclaration expressionList
+compileLocal statement =
+  do let expressionList = statementContents statement
+     if any (\e -> statementID ((head . statementContents) e) == EXPRESSION_ASSIGN) expressionList
+     then do putDebugAnnotation (statementLineNumber statement)
+     else return ()
+     mapM_ compileLocalAutomaticVariableDeclaration expressionList
      
 compileLocalAutomaticVariableDeclaration :: Statement -> CodeTransformation ()
-compileLocalAutomaticVariableDeclaration Statement {statementContents = (expression:_)} =
+compileLocalAutomaticVariableDeclaration Statement {statementContents = (expression:_),
+                                                    statementLineNumber = lineNumber} =
   do if statementID expression == EXPRESSION_ASSIGN
-     then compileExpression expression
+     then do compileExpression expression
      else return ()
 
 #if LINUX==1 || MAC_OS==1
@@ -2356,13 +2496,16 @@ putEndFunction =
 
 #if LINUX==1 || MAC_OS==1
 compileEnd :: Statement -> CodeTransformation ()
-compileEnd (Statement {statementContents = (exitCode:_)}) =
+compileEnd (Statement {statementContents = (exitCode:_),
+                       statementLineNumber = lineNumber}) =
   do console <- gets (optionConsole . configOptions . compileStateConfig)
      let finalFunctionName =
            if console
            then "final_libkoshka_core"
            else "final_libkoshka_mm"
-
+     
+     putDebugAnnotation lineNumber
+     
      insertFunctionCall finalFunctionName []
      putAsm
        ["sub rsp, 8\n",
@@ -2433,7 +2576,7 @@ compileReducedExpression (Statement {statementID = EXPRESSION_ASSIGN,
                 identifier = getInitialStatement identifierExpression
                 sourceName = identifierExpressionValue identifier
                 name = removeTypeTag (map toLower sourceName)
-                Array _ (VARIABLE_TYPE_ARRAY arrayType) numDimensions = lookupVariable name symbols localSymbols nameSpace
+                Array _ _ (VARIABLE_TYPE_ARRAY arrayType) _ numDimensions = lookupVariable name symbols localSymbols nameSpace
 
             case arrayType of
 
@@ -2651,7 +2794,7 @@ compileReducedExpression (Statement {statementID = EXPRESSION_FUNCTION_CALL,
                      setDataType dataType
                      insertTypeFilter returnType
 
-                (Array name arrayType numDimensions) ->
+                (Array name _ arrayType _ numDimensions) ->
 
                   do insertArrayAccess name arguments True
 
@@ -2713,28 +2856,28 @@ compileReducedExpression (Statement {statementID = EXPRESSION_IDENTIFIER,
                     ["mov " ++ registerName register ++ ", [" ++ decorateVariableName name symbols localSymbols nameSpace ++ "]\n"]
                   insertTypeFilter (VARIABLE_TYPE_CUSTOM typeName)
                   
-             (Array _ _ _) ->
+             (Array _ _ _ _ _) ->
 
                do allocateRegister
                   register <- gets currentRegister
                   putAsm ["mov " ++ registerName register ++ ", [" ++ decorateVariableName name symbols localSymbols nameSpace ++ "]\n"]
                   insertTypeFilter VARIABLE_TYPE_INT
 
-             (LocalAutomaticVariable _ VARIABLE_TYPE_INT _ address) ->
+             (LocalAutomaticVariable _ VARIABLE_TYPE_INT _ _ _ address) ->
 
                do allocateRegister
                   register <- gets currentRegister
                   putAsm ["mov " ++ registerName register ++ ", [rbp + " ++ show address ++ "]\n"]
                   insertTypeFilter VARIABLE_TYPE_INT
 
-             (LocalAutomaticVariable _ VARIABLE_TYPE_FLOAT _ address) ->
+             (LocalAutomaticVariable _ VARIABLE_TYPE_FLOAT _ _ _ address) ->
 
                do allocateFloatRegister
                   putAsm
                     ["fld qword [rbp + " ++ show address ++ "]\n"]
                   insertTypeFilter VARIABLE_TYPE_FLOAT
 
-             (LocalAutomaticVariable _ VARIABLE_TYPE_STRING _ address) ->
+             (LocalAutomaticVariable _ VARIABLE_TYPE_STRING _ _ _ address) ->
 
                do allocateRegister
                   register <- gets currentRegister
@@ -2750,7 +2893,7 @@ compileReducedExpression (Statement {statementID = EXPRESSION_IDENTIFIER,
                   putAsm ["mov " ++ registerName register ++ ", [rbp + " ++ show address ++ "]\n"]
                   insertTypeFilter (VARIABLE_TYPE_CUSTOM typeName)
                   
-             k -> error ("Critical error in function compileReducedExpression (EXPRESSION_IDENTIFIER).\n ")
+             k -> error (show k)
 
 compileReducedExpression (Statement {statementID = EXPRESSION_INT_CONSTANT,
                                      statementContents = (intConstant:_)}) =
@@ -3030,20 +3173,6 @@ compileIntArithmeticExpression expression =
                      compileExpression rightOperand
                      rightRegister <- gets currentRegister
                      includeAllRegisters
-
-                     anticipateFatalError rightOperand
-                     if debug
-                     then do nextLabelID
-                             skipLabelID <- gets compileStateLabelID
-                             putAsm
-                               ["cmp " ++ registerName rightRegister ++ ", 0\n",
-                                "jne " ++ generateLabelName skipLabelID ++ "\n"]
-                             insertFunctionCall "fatal_error"
-                               [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression runtimeErrorDivisionByZeroException]]
-                            
-                             putAsm
-                               [generateLabelName skipLabelID ++ ":\n\n"]
-                     else return ()
    
                      putAsm
                        ["mov rax, " ++ registerName leftRegister ++ "\n",
@@ -3068,20 +3197,6 @@ compileIntArithmeticExpression expression =
                      compileExpression rightOperand
                      rightRegister <- gets currentRegister
                      includeAllRegisters
-
-                     anticipateFatalError rightOperand
-                     if debug
-                     then do nextLabelID
-                             skipLabelID <- gets compileStateLabelID
-                             putAsm
-                               ["cmp " ++ registerName rightRegister ++ ", 0\n",
-                                "jne " ++ generateLabelName skipLabelID ++ "\n"]
-                             insertFunctionCall "fatal_error"
-                               [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression runtimeErrorDivisionByZeroException]]
-                            
-                             putAsm
-                               [generateLabelName skipLabelID ++ ":\n\n"]
-                     else return ()
 
                      putAsm
                        ["mov rax, " ++ registerName leftRegister ++ "\n",
@@ -3314,6 +3429,9 @@ compileNewExpression (Statement {statementID = EXPRESSION_NEW,
      insertFunctionCall "new"
        [RawRegister (registerName r1) VARIABLE_TYPE_INT,
         RawRegister (registerName r2) VARIABLE_TYPE_INT]
+        
+     putAsm
+       ["mov qword [rax - 8], " ++ show (typeID t) ++ "\n"]
 
 compileTypeConversionExpression :: Statement -> CodeTransformation ()
 compileTypeConversionExpression expression =
@@ -3684,7 +3802,6 @@ compileFieldAccessExpression dereference expression =
             putAsm
               ["mov " ++ registerName register ++ ", [" ++ decorateVariableName name symbols localSymbols nameSpace ++ "]\n"]
 
-            exceptionCheck register debug leftOperand
             setCurrentRegister register
                       
             if fieldOffset field /= 0
@@ -3708,7 +3825,6 @@ compileFieldAccessExpression dereference expression =
 
             register <- gets currentRegister
 
-            exceptionCheck register debug leftOperand
             setCurrentRegister register
 
             if fieldOffset field /= 0
@@ -3737,7 +3853,6 @@ compileFieldAccessExpression dereference expression =
             insertArrayAccess name arguments True
             register <- gets currentRegister
 
-            exceptionCheck register debug leftOperand
             setCurrentRegister register
 
             if fieldOffset field /= 0
@@ -3777,22 +3892,6 @@ compileFieldAccessExpression dereference expression =
                    ["mov " ++ registerName register ++ ", [" ++ registerName register ++ "]\n"]
                  insertTypeFilter (VARIABLE_TYPE_CUSTOM typeName)
      else return ()
-
-  where exceptionCheck register debug statement =
-          do anticipateFatalError statement
-             if debug
-             then do nextLabelID
-                     skipLabelID <- gets compileStateLabelID
-                     putAsm
-                       ["cmp " ++ registerName register ++ ", 0\n",
-                        "jne " ++ generateLabelName skipLabelID ++ "\n"]
-                     insertFunctionCall "fatal_error"
-                       [createMinimalStatement EXPRESSION_STRING_CONSTANT [StringConstantExpression runtimeErrorNullPointerException]]
-                            
-                     putAsm
-                       [generateLabelName skipLabelID ++ ":\n\n"]
-                         
-             else return ()
 
 insertTypeFilter :: VariableType -> CodeTransformation ()
 insertTypeFilter sourceType =
@@ -4051,6 +4150,15 @@ linkedListFinal type_ =
      register <- gets currentRegister
      deallocateRegisters [register]
 
+putBASICDataSection :: CodeTransformation ()
+putBASICDataSection =
+ do bucket <- getAsmBucket
+    setAsmBucket data_
+    putAsm
+      ["SECTION .data\nBASIC_DATA:\n\n"]
+    putDataSentinel
+    setAsmBucket bucket
+
 putDataSentinel :: CodeTransformation ()
 putDataSentinel =
   do bucket <- getAsmBucket
@@ -4119,45 +4227,6 @@ putAuxiliaryCode :: CodeTransformation ()
 putAuxiliaryCode =
   do bucket <- getAsmBucket
      setAsmBucket functions_
-     {--putAsm
-       ["" ++ bbFunctionPrefix ++ "init_string:\n\n",
-        "push rbp\n",
-        "mov rax, NULL_STRING\n",
-        "mov [rdi], rax\n",
-        "pop rbp\n",
-        "ret\n\n"]
-
-     putAsm
-       [bbFunctionPrefix ++ "free_string:\n\n",
-        "push rbp\n",
-        "mov rbp, rsp\n",
-        "push rbx\n",
-        "push r12\n",
-        "push r13\n",
-        "push r14\n",
-        "push r15\n",
-        "mov rbx, rdi\n",
-        "cmp rbx, 0\n",
-        "jz .null_or_empty_string\n",
-        "sub rsp, 8\n",
-        "call [" ++ osFunctionPrefix ++ "strlen wrt ..got]\n",
-        "add rsp, 8\n",
-        "cmp rax, 0\n",
-        "jle .null_or_empty_string\n",
-        "mov rdi, rbx\n",
-        "mov rax, 0\n",
-        "sub rsp, 8\n",
-        "call [" ++ osFunctionPrefix ++ "free wrt ..got]\n",
-        "add rsp, 8\n",
-        ".null_or_empty_string:\n",
-        "pop r15\n",
-        "pop r14\n",
-        "pop r13\n",
-        "pop r12\n",
-        "pop rbx\n",
-        "pop rbp\n",
-        "ret\n\n"]
-     --}
      setAsmBucket bucket
 
 #elif WINDOWS==1
@@ -4257,59 +4326,24 @@ externFunctionDeclaration (Function {functionName = name,functionOrigin = FUNCTI
 
 externFunctionDeclaration _ = return ()
 
-intToHexString :: Int -> [Char]
-intToHexString integer =
-  if isolateRest integer /= 0
-  then  (intToHexString . shiftRight4Bits) integer Prelude.++ (nibbleToHexDigit . isolateNibble) integer
-  else (nibbleToHexDigit . isolateNibble) integer
-  where shiftRight4Bits i = uShiftR i 4
-        isolateNibble i = i .&. 0xF
-        isolateRest i = i .&. 0xFFFFFFFFFFFFFFF0
-        nibbleToHexDigit n =
-          case n of
-            0 -> "0"
-            1 -> "1"
-            2 -> "2"
-            3 -> "3"
-            4 -> "4"
-            5 -> "5"
-            6 -> "6"
-            7 -> "7"
-            8 -> "8"
-            9 -> "9"
-            10 -> "A"
-            11 -> "B"
-            12 -> "C"
-            13 -> "D"
-            14 -> "E"
-            15 -> "F"
 
-intToBinString :: Int -> [Char]
-intToBinString integer =
-  if isolateRest integer /= 0
-  then (intToBinString . shiftRight1Bit) integer Prelude.++ (bitToBinDigit . isolateBit) integer
-  else (bitToBinDigit . isolateBit) integer
-  where shiftRight1Bit i = uShiftR i 1
-        isolateBit i = i .&. 1
-        isolateRest i = i .&. (-2)
-        bitToBinDigit n =
-          case n of
-            0 -> "0"
-            1 -> "1"
 
 
 putDebugInfo :: CodeTransformation ()
 putDebugInfo =
   do debug <- gets (optionDebug . configOptions . compileStateConfig)
-     if debug
-     then do mapM_ putSectionHeader [(debug_info_,"debug_info"),(debug_abbrev_,"debug_abbrev"),(debug_line_,"debug_line"),(debug_str_,"debug_str")]
+     if False == True
+     then do mapM_ putSectionHeader [(debug_info_,"debug_info"),(debug_abbrev_,"debug_abbrev"),(debug_line_,"debug_line"),(debug_str_,"debug_str"),(debug_frame_,"debug_frame")]
              
              putCompilationUnitHeader
+             
              putDWARFAbbreviations
              putDWARFDIEs
              putDWARFStrings
-             
-             
+             putDWARFLineNumberProgram
+             putDWARFFrameInfo
+
+
      else return ()
      where putSectionHeader (bucket,name) =
              do prevBucket <- getAsmBucket
@@ -4318,10 +4352,6 @@ putDebugInfo =
                   ["section '." ++ name ++ "'\n\n"] ["SECTION ." ++ name ++ "\n\n"]
                 
                 setAsmBucket prevBucket
-              
---putDWARFCompilationUnitHeader :: CodeTransformation ()
---putDWARFCompilationUnitHeader =
---  do
 
 attributeSpecToString :: DWARFAttributeSpec -> [Char]
 attributeSpecToString spec =
@@ -4334,23 +4364,16 @@ putCompilationUnitHeader =
      dwarfDIEs <- gets (debugInfoDIEs . compileStateDebugInfo)
      offset <- gets (debugInfoDIEOffset . compileStateDebugInfo)
      
-     let unitLength = offset - fromIntegral dwarfCompilationUnitInitialLengthSize + 1 --fromIntegral (dwarfCompilationUnitHeaderSize - dwarfCompilationUnitInitialLengthSize) + offset -- (foldr (\dd a -> dwarfDIECalculateSize dd + a) 0 dwarfDIEs)
+     let unitLength = offset - fromIntegral dwarfInitialLengthSize + 1
 
      setAsmBucket debug_info_
-     putAsm ["dd " ++ show unitLength ++ "\n",
+     putAsm ["DBG_COMPILATION_UNIT_BEGINS equ $\n",
+             "dd (DBG_COMPILATION_UNIT_ENDS - DBG_COMPILATION_UNIT_BEGINS - 4) ; " ++ show unitLength ++ "\n",
              "dw 4\n",
              "dd 0\n",
              "db 8\n"]
      setAsmBucket bucket
      
-unsignedLEB128ToString :: DWARFUnsignedLEB128 -> [Char]
-unsignedLEB128ToString i =
-  intercalate "," (map (("0x" ++) . intToHexString) (map fromIntegral (uLEB128 i)))
-
-signedLEB128ToString :: DWARFSignedLEB128 -> [Char]
-signedLEB128ToString i =
-  intercalate ", " (map (("0x" ++) . intToHexString) (map fromIntegral (sLEB128 i)))
-
 putDWARFAbbreviation :: DWARFAbbreviation -> CodeTransformation ()
 putDWARFAbbreviation abbreviation =
   do if abbreviationKey abbreviation /= "NONE"
@@ -4382,80 +4405,31 @@ bytesToString bytes =
   intercalate ", " (map (("0x" ++) . intToHexString) (map fromIntegral bytes))
 
 putDWARFAttribute :: DWARFAttribute -> CodeTransformation ()
-putDWARFAttribute a =
-  do let sizeDecl =
-           case dwarfAttributeSize a of
-                  1 -> "db"
-                  2 -> "dw"
-                  4 -> "dd"
-                  8 -> "dq"
-                  _ -> "db"
-                  
-     putAsm [sizeDecl ++ " " ++ dwarfAttributeToString a ++ "\n"]
-  
-dwarfAttributeToString :: DWARFAttribute -> [Char]
-dwarfAttributeToString (DWARFAttributeRefStrp d) = show d
-dwarfAttributeToString (DWARFAttributeAddr a) = show a
-dwarfAttributeToString (DWARFAttributeBlock1 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
-dwarfAttributeToString (DWARFAttributeBlock2 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
-dwarfAttributeToString (DWARFAttributeBlock4 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
-dwarfAttributeToString (DWARFAttributeBlock8 s d) = "0x" ++ intToHexString (fromIntegral s) ++ ", " ++ bytesToString d
-dwarfAttributeToString (DWARFAttributeBlock s d) = "0x" ++ unsignedLEB128ToString s ++ ", " ++ bytesToString d ++ "\n"
-dwarfAttributeToString (DWARFAttributeData1UnsignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData1SignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData2UnsignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData2SignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData4UnsignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData4SignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData4Float d) = show d
-dwarfAttributeToString (DWARFAttributeData8UnsignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData8SignedInt d) = show d
-dwarfAttributeToString (DWARFAttributeData8Double d) = show d
-dwarfAttributeToString (DWARFAttributeDataUnsignedLEB128 d) = unsignedLEB128ToString d
---dwarfAttributeToString (DWARFAttributeDataSignedLEB128 _) = 
---dwarfAttributeToString (DWARFAttributeExprLoc) = 0 
-dwarfAttributeToString (DWARFAtttributeFlag d) = show d
-dwarfAttributeToString (DWARFAttributeLinePtr d) = show d
-dwarfAttributeToString (DWARFAttributeLocListPtr d) = show d
-dwarfAttributeToString (DWARFAttributeMacPtr d) = show d
-dwarfAttributeToString (DWARFAttributeRangeListPtr d) = show d
-dwarfAttributeToString (DWARFAttributeRef1 d) = show d
-dwarfAttributeToString (DWARFAttributeRef2 d) = show d
-dwarfAttributeToString (DWARFAttributeRef4 d) = show d
-dwarfAttributeToString (DWARFAttributeRef8 d) = show d
-dwarfAttributeToString (DWARFAttributeRefUData d) = unsignedLEB128ToString d
-dwarfAttributeToString (DWARFAttributeRefAddr d) = show d
-dwarfAttributeToString (DWARFAttributeRefSig8 d) = show d
-dwarfAttributeToString (DWARFAttributeRefString s) = s ++ ",0"
-dwarfAttributeToString (DWARFAttributeRefStrp p) = show p
-dwarfAttributeToString (DWARFDIECrossReference i) = show i
-dwarfAttributeToString k = error (show k)
+putDWARFAttribute (DWARFAttribute1 value) =
+     putAsm ["db " ++ value ++ "\n"]
 
-{--
-putDWARFDIE :: DWARFDIE -> CodeTransformation ()
-putDWARFDIE dwarfDIE =
-  do --liftIO $ putStrLn ("DIE of offst " ++ show (dwarfDIEOffset dwarfDIE))
-     putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dwarfDIE)) ++ "\n"]
-     mapM_ putDWARFAttribute (dwarfDIEAttributes dwarfDIE)
---}
+putDWARFAttribute (DWARFAttribute2 value) =
+     putAsm ["dw " ++ value ++ "\n"]
 
-putDWARFDIE :: DWARFDIE -> Int -> CodeTransformation ()
-putDWARFDIE dwarfDIE depth =
-  do liftIO $ putStrLn ("DIE of depth " ++ show (dwarfDIEDepth dwarfDIE))
-     if dwarfDIEDepth dwarfDIE < depth
-     then do return ()
-             putAsm ["db 0;:LALALA\n"]
-             {--state <- get
-             debugInfo <- gets compileStateDebugInfo
-             offset <- gets (debugInfoDIEOffset . compileStateDebugInfo)
-             put state {compileStateDebugInfo =
-                        debugInfo {debugInfoDIEOffset = offset + 1}}
---}
-             
-             
-     else return ()
-     putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (dwarfDIEAbbreviationCode dwarfDIE)) ++ "\n"]
-     mapM_ putDWARFAttribute (dwarfDIEAttributes dwarfDIE)
+putDWARFAttribute (DWARFAttribute4 value) =
+     putAsm ["dd " ++ value ++ "\n"]
+
+putDWARFAttribute (DWARFAttribute8 value) =
+     putAsm ["dq " ++ value ++ "\n"]
+
+putDWARFAttribute (DWARFCrossReferenceAttribute value) =
+  do dies <- gets (debugInfoDIEs . compileStateDebugInfo)
+     let fixup = show (dwarfDIEOffset (fromJust (Map.lookup value dies)))
+     putAsm ["dd " ++ fixup ++ "\n"]
+
+putDWARFAttribute (DWARFVariableLengthAttribute size value) =
+     putAsm ["db " ++ value ++ "\n"]
+
+putDWARFDIE (DWARFDIE {dwarfDIEAbbreviationCode = abbreviationCode,
+                       dwarfDIEAttributes = attributes,
+                       dwarfDIEOffset = offset}) =
+  do putAsm ["db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 abbreviationCode) ++ "\n"]
+     mapM_ putDWARFAttribute attributes
 
 putDWARFDIEs :: CodeTransformation ()
 putDWARFDIEs =
@@ -4464,20 +4438,21 @@ putDWARFDIEs =
      let dwarfDIEs = map snd (sortBy (comparing (dwarfDIEOffset .snd)) (Map.toAscList rawDIEs))
      
      setAsmBucket debug_info_  
-     putDWARFDIEsLoop dwarfDIEs 0
-     putAsm ["db 0\n"]
+     putDWARFDIEsLoop dwarfDIEs
+     putAsm ["db 0\n",
+             "DBG_COMPILATION_UNIT_ENDS equ $\n"]
      setAsmBucket bucket
 
-putDWARFDIEsLoop :: [DWARFDIE] -> Int -> CodeTransformation ()
-putDWARFDIEsLoop dies depth
+putDWARFDIEsLoop :: [DWARFDIE] -> CodeTransformation ()
+putDWARFDIEsLoop (die:dies)
   | length dies > 1 =
-      do putDWARFDIE (head dies) depth
-         putDWARFDIEsLoop (tail dies) (dwarfDIEDepth (head dies))
+      do putDWARFDIE die
+         putDWARFDIEsLoop dies
   | length dies == 1 =    
-      do putDWARFDIE (head dies) depth
+      do putDWARFDIE die
   | otherwise =
       do return ()
-  
+
 putDWARFString :: [Char] -> CodeTransformation ()
 putDWARFString string =
   do putAsm ["db " ++ show string ++ ",0\n"]
@@ -4491,6 +4466,166 @@ putDWARFStrings =
      mapM_ putDWARFString strings
      setAsmBucket bucket
 
+putDWARFLineNumberProgramHeader :: CodeTransformation  ()
+putDWARFLineNumberProgramHeader =
+  do includeFileNames <- gets compileStateIncludeFileNames
+     let l = map (\s -> "db \"" ++ s ++ "\",0,0,0,0\n") includeFileNames
+     putAsm
+       ["dd (DBG_LINE_NUMBER_PROGRAM_ENDS - $ - 4) ; initial length\n",
+        "dw 4 ; version\n",
+        "dd (DBG_LINE_NUMBER_HEADER_LENGTH - $ - 4)\n",
+        "db 1 ; smallest instruction size on x86-64\n",
+        "db 1 ; operations per instruction on x86-64\n",
+        "db 1 ; default is_stmt\n",
+        "db (-5) ; line base\n",
+        "db 14 ; line range\n",
+        "db 13 ; opcode base\n",
+        "db 0,1,1,1,1,0,0,0,1,0,0,1 ; standard opcodes num operands\n",
+        "db 0 ; no include directories\n"]
+     putAsm l
+     putAsm
+       ["db 0 ; ends\n",
+        "DBG_LINE_NUMBER_HEADER_LENGTH equ $\n"]
+
+putDWARFLineNumberProgram :: CodeTransformation  ()
+putDWARFLineNumberProgram =
+  do state <- get
+     debugInfo <- gets compileStateDebugInfo
+     lineNumberProgram <- gets (debugInfoLineNumberProgram . compileStateDebugInfo)
+     bucket <- getAsmBucket
+     setAsmBucket debug_line_
+     putDWARFLineNumberProgramHeader
+     mapM_ putDWARFLineNumberInstructions lineNumberProgram
+     putAsm ["DBG_LINE_NUMBER_PROGRAM_ENDS equ $\n"]
+     setAsmBucket bucket
+
+putDWARFLineNumberInstructions :: DWARFLNInstruction -> CodeTransformation ()
+putDWARFLineNumberInstructions DWARFLNSetMainAddress =
+  putAsm ["db 0 ; extended op\n",
+          "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 9) ++ " ; size\n",
+          "db 0x2 ; opcode\n",
+          "dq DBG_MAIN ; relocatable address\n"]
+
+putDWARFLineNumberInstructions (DWARFLNSetFile fileName) =
+  do includeFileNames <- gets compileStateIncludeFileNames
+     putAsm ["db 4 ; set file\n",
+             "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 (fromJust (elemIndex fileName includeFileNames))) ++ " ; " ++ fileName ++ "\n"]
+
+putDWARFLineNumberInstructions DWARFLNEndSequence =
+  do putAsm ["db 0 ; extended op\n",
+             "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 1) ++ " ; size\n",
+             "db 1 ; end sequence\n"]
+
+putDWARFLineNumberInstructions (DWARFLNAdvance id) =
+  if id /= 0
+  then putAsm ["DBG_ADVANCE (" ++ constructDebugLineAnnotationName id ++ " - " ++ constructDebugLineAnnotationName (id - 1) ++ "), " ++ "(" ++ constructDebugPCAnnotationName id ++ " - " ++ constructDebugPCAnnotationName (id - 1) ++ ")\n"]
+  else return ()
+
+putDWARFLineNumberInstructions DWARFLNCopy =
+  do putAsm ["db 0x1\n"]
+
+putDWARFLineNumberInstructions DWARFLNSetPrologueEnd =
+  do putAsm ["db 0xa\n"]
+
+putDWARFLineNumberInstructions DWARFLNSetEpilogueBegin =
+  do putAsm ["db 0xb\n"]
+  
+addDWARFLNInstruction :: DWARFLNInstruction -> CodeTransformation ()
+addDWARFLNInstruction instruction =
+  do state <- get
+     debugInfo <- gets compileStateDebugInfo
+     lineNumberProgram <- gets (debugInfoLineNumberProgram . compileStateDebugInfo)
+     put $ state {compileStateDebugInfo =
+                  debugInfo {debugInfoLineNumberProgram = lineNumberProgram Seq.|> instruction}}
+
+putDWARFFrameInfo :: CodeTransformation  ()
+putDWARFFrameInfo =
+  do state <- get
+     symbols <- gets compileStateSymbols
+     bucket <- getAsmBucket
+     let functionList = filter symbolIsFunction (Map.elems symbols)
+     setAsmBucket debug_frame_
+     putDWARFCIE
+     mapM_ putDWARFFDE functionList
+     setAsmBucket bucket
+  where symbolIsFunction s =
+          case s of Function {functionOrigin = FUNCTION_ORIGIN_USER} -> True
+                    _ -> False
+
+putDWARFCIE :: CodeTransformation ()
+putDWARFCIE =
+  do let instructions =
+           [DWARFCFADefCFA 7 8,
+            DWARFCFAOffset 16 1,
+            DWARFCFANop,
+            DWARFCFANop]
+     putAsm
+       ["DBG_CIE_BEGINS equ $\n",
+        "dd (DBG_CIE_ENDS - $ - 4) ; initial length\n",
+        "dd 0xffffffff ; this is a CIE\n",
+        "db 99 ; version\n",
+        "db 0 ; no augmentation\n",
+        
+        "db 8 ; address size for x86-64\n",
+        "db 0 ; segment selector size\n",
+        "db " ++ unsignedLEB128ToString (encodeUnsignedLEB128 1) ++ " ; code alignment factor\n",
+        "db " ++ signedLEB128ToString (encodeSignedLEB128 (-8)) ++ " ; data alignment factor\n",
+        "db 16 ; return address register\n"]
+     mapM_ putDWARFCFAInstructions instructions
+     putAsm ["DBG_CIE_ENDS equ $\n"]
+
+putDWARFFDE :: Symbol -> CodeTransformation ()
+putDWARFFDE function =
+  do let name = functionName function
+         instructions = [DWARFCFAAdvanceLoc ("DBG_STORED_FRAME_POINTER_" ++ name ++ " - DBG_BEGIN_" ++ name),
+                         DWARFCFADefCFAOffset 16,
+                         DWARFCFAOffset 6 2,
+                         DWARFCFAAdvanceLoc ("DBG_SETUP_FRAME_" ++ name ++ " - DBG_STORED_FRAME_POINTER_" ++ name),
+                         DWARFCFADefCFARegister 6,
+                         DWARFCFAAdvanceLoc ("DBG_DESTROYED_FRAME_" ++ name ++ " - DBG_SETUP_FRAME_" ++ name),
+                         DWARFCFADefCFA 7 8,
+                         DWARFCFANop,
+                         DWARFCFANop,
+                         DWARFCFANop]
+     
+     if name /= "bbu_end"
+     then do putAsm
+               ["dd (DBG_FDE_" ++ name ++ "_ENDS - $ - 4) ; initial length\n",
+                "dd 0 ;$ - DBG_CIE_BEGINS ; this is an FDE\n",
+                "dq DBG_BEGIN_" ++ name ++ " ; entry point for function\n",
+                "dq DBG_END_" ++ name ++ " - DBG_BEGIN_" ++ name ++ " ; function size in bytes\n"]
+                
+             mapM_ putDWARFCFAInstructions instructions
+
+             putAsm
+               ["DBG_FDE_" ++ functionName function ++ "_ENDS equ $\n"]
+     else return ()
+               
+putDWARFCFAInstructions :: DWARFCFAInstruction -> CodeTransformation ()
+putDWARFCFAInstructions (DWARFCFADefCFA reg offset) =
+  do putAsm
+       ["db 0xc, " ++ unsignedLEB128ToString (encodeUnsignedLEB128 reg) ++ ", " ++ unsignedLEB128ToString (encodeUnsignedLEB128 offset) ++ " ; define CFA (register and offset)\n"]
+
+putDWARFCFAInstructions (DWARFCFAOffset reg offset) =
+  do putAsm
+       ["db ((2 << 6) | " ++ show reg ++ "), " ++ unsignedLEB128ToString (encodeUnsignedLEB128 offset) ++ " ; encode register's previous value as offset from CFA\n"]
+
+putDWARFCFAInstructions (DWARFCFAAdvanceLoc delta) =
+  putAsm
+    ["DBG_CFA_ADVANCE_LOC " ++ delta ++ "\n"]
+
+putDWARFCFAInstructions (DWARFCFADefCFAOffset offset) =
+  do putAsm
+       ["db 0xe, " ++ unsignedLEB128ToString (encodeUnsignedLEB128 offset) ++ " ; keep CFA register but update offset\n"]
+
+putDWARFCFAInstructions (DWARFCFADefCFARegister reg) =
+  do putAsm
+       ["db 0xd, " ++ unsignedLEB128ToString (encodeUnsignedLEB128 reg) ++ " ; change CFA register\n"]
+
+putDWARFCFAInstructions DWARFCFANop =
+  do putAsm
+       ["db 0\n"]
+       
 linkedListDeclaration :: Symbol -> CodeTransformation ()
 linkedListDeclaration (Type {typeName = name}) =
   putAsm
@@ -4519,7 +4654,7 @@ variableDeclaration symbols strings (Variable {variableName = name,
         then decorateVariableName name symbols Map.empty NO_NAMESPACE ++ " dq NULL_STRING\n"
         else decorateVariableName name symbols Map.empty NO_NAMESPACE ++ " dq 0\n"
 
-variableDeclaration symbols strings (Array name dataType numDimensions) =
+variableDeclaration symbols strings (Array name id dataType lineNumber numDimensions) =
         decorateVariableName name symbols Map.empty NO_NAMESPACE ++ " dq 0\n"
 
 intDeclaration :: (Int,Int) -> String
@@ -4555,7 +4690,7 @@ stringFree symbols (Variable {variableName = name}) =
 
 #if LINUX==1 || MAC_OS==1
 arrayFree :: SymbolTable -> SymbolTable -> Symbol -> CodeTransformation ()
-arrayFree symbols localSymbols (Array name (VARIABLE_TYPE_ARRAY targetType) dimensionality) =
+arrayFree symbols localSymbols (Array name id (VARIABLE_TYPE_ARRAY targetType) lineNumber dimensionality) =
         do if targetType == VARIABLE_TYPE_STRING
              then putAsm
                        ["mov rdi, [" ++ decorateVariableName name symbols localSymbols NO_NAMESPACE ++ "]\n",
@@ -4588,7 +4723,35 @@ arrayFree symbols localSymbols (Array name (VARIABLE_TYPE_ARRAY targetType) dime
                         "call [" ++ bbFunctionPrefix ++ "deallocate_array]\n",
                         "add rsp, 32\n"]
 #endif
-                        
+
+constructDebugLineAnnotationName :: Int -> String
+constructDebugLineAnnotationName annotationID =
+  "DBG_LINE_" ++ (show annotationID)
+
+constructDebugPCAnnotationName :: Int -> String
+constructDebugPCAnnotationName annotationID =
+  "DBG_PC_" ++ (show annotationID)
+  
+constructDebugAnnotationLabelName :: [Char] -> Int -> Int -> String
+constructDebugAnnotationLabelName fileName lineNumber annotationID =
+  "DBG_" ++ modifiedFileName ++ "_" ++ (show lineNumber) ++ "_" ++ (show annotationID)
+  where modifiedFileName = map replaceAwkwardCharacter fileName
+
+replaceAwkwardCharacter :: Char -> Char
+replaceAwkwardCharacter s =
+  if s `elem` " ."
+  then '_'
+  else s
+
+compilerNextDebugAnnotationID :: CodeTransformation Int
+compilerNextDebugAnnotationID =
+  do state <- get
+     debugInfo <- gets compileStateDebugInfo
+     let id = debugInfoAnnotationID debugInfo
+     
+     put $ state {compileStateDebugInfo = debugInfo {debugInfoAnnotationID = (id + 1)}}
+     return id
+   
 nextLabelID :: CodeTransformation ()
 nextLabelID =
         do state <- get
@@ -4611,33 +4774,6 @@ generateStringConstantLabelName :: Int -> String
 generateStringConstantLabelName id =
         "SC" ++ show id
 
-decorateVariableName :: String -> SymbolTable -> SymbolTable -> Symbol -> String
-decorateVariableName sourceName symbols localSymbols nameSpace =
-
-        let name = removeTypeTag (map toLower sourceName)
-            symbol = lookupVariable name symbols localSymbols nameSpace in
- 
-        case symbol of
-             (Const {constType = VARIABLE_TYPE_INT}) -> "BBci_" ++ name
-             (Const {constType = VARIABLE_TYPE_FLOAT}) -> "BBcf_" ++ name
-             (Const {constType = VARIABLE_TYPE_STRING}) -> "BBcs_" ++ name
-             (Variable {variableType = VARIABLE_TYPE_INT}) -> "BBi_" ++ name
-             (Variable {variableType = VARIABLE_TYPE_FLOAT}) -> "BBf_" ++ name
-             (Variable {variableType = VARIABLE_TYPE_STRING}) -> "BBs_" ++ name
-             (Variable {variableType = VARIABLE_TYPE_CUSTOM {customTypeName = typeName}}) -> "BBc_" ++ typeName ++ "_" ++ name
-             (LocalAutomaticVariable {localAutomaticVariableAddress = offset}) -> "rbp + " ++ (show offset)
-             (Array {}) -> "BBa_" ++ takeWhile isAlphaUnderscore name
-             k -> error ("Critical error in decorateVariableName.")
-        where isAlphaUnderscore char = isAlpha (char) || char == '_'
-
-decorateLabelName :: String -> String
-decorateLabelName string = ".BBlabel_" ++ string
-
-decorateLinkedListName :: String -> String
-decorateLinkedListName string = "BB_LL_" ++ (map toLower string)
-
-decorateTypeStringOffsetsName :: String -> String
-decorateTypeStringOffsetsName string = "BB_STRINGS_" ++ (map toLower string)
 
 isArithmeticExpressionID :: StatementID -> Bool
 isArithmeticExpressionID id
@@ -4772,7 +4908,9 @@ allocateRegister =
      if suggestedRegister /= NO_REGISTER
      then do allocateSuggestedRegister suggestedRegister
      else do if container == Nothing
-             then throwCompileError "Out of general purpose registers." (compileStateLineNumber state)
+             then do asm <- gets compileStateAsm
+                     let text = concat (concatMap (Foldable.toList . asmBucketContents . snd) (Map.toAscList (asmBucketMap asm)))
+                     throwCompileError ("Out of general purpose registers 1." ++ text) (head (compileStateLineNumberStack state))
              else return ()
              put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextCurrentRegister = allocatedRegister, cpuContextPool = updateRegisterPool pool allocatedRegister}}
 
@@ -4788,7 +4926,7 @@ allocateSuggestedRegister desiredRegister =
          allocatedRegister = Register (registerName register) (registerAllocations register + 1) False False
 
      if container == Nothing
-     then do throwCompileError "Critical error in allocateSuggestedRegister." (compileStateLineNumber state)
+     then do throwCompileError "Critical error in allocateSuggestedRegister." (head (compileStateLineNumberStack state))
      else do put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextCurrentRegister = allocatedRegister, cpuContextPool = updateRegisterPool pool allocatedRegister}}
              unSuggestRegister
 
@@ -4803,7 +4941,9 @@ allocateSpecificRegister desiredRegister =
                allocatedRegister = Register (registerName register) (registerAllocations register + 1) False False
 
            if container == Nothing
-           then throwCompileError "Out of general purpose registers." (compileStateLineNumber state)
+           then do asm <- gets compileStateAsm
+                   let text = concat (concatMap (Foldable.toList . asmBucketContents . snd) (Map.toAscList (asmBucketMap asm)))
+                   throwCompileError ("Out of general purpose registers2." ++ text) (head (compileStateLineNumberStack state))
            else return ()
            put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextCurrentRegister = allocatedRegister, cpuContextPool = updateRegisterPool pool allocatedRegister}}
 
@@ -4823,7 +4963,9 @@ reserveRegisterForFunctionCallWithPreference preferredRegister =
                reservedRegister = Register (registerName register) (registerAllocations register) True False
 
            if preferredRegisterContainer == Nothing && suppliedRegisterContainer == Nothing
-           then do _ <- throwCompileError "Out of general purpose registers." (compileStateLineNumber state)
+           then do asm <- gets compileStateAsm
+                   let text = concat (concatMap (Foldable.toList . asmBucketContents . snd) (Map.toAscList (asmBucketMap asm)))
+                   _ <- throwCompileError ( "Out of general purpose registers3." ++ text) (head (compileStateLineNumberStack state))
                    return NO_REGISTER
            else return NO_REGISTER
            put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextCurrentRegister = reservedRegister, cpuContextPool = updateRegisterPool pool reservedRegister}}
@@ -4842,7 +4984,7 @@ unreserveRegisters (reservedRegister : rest) =
            if registerName reservedRegister == "rax"
            then do unreserveRegisters rest
            else do if not (registerReservedForFunctionCall register)
-                   then throwCompileError ("Compiler attempted to unreserve a register (" ++ registerName register ++ ") not previously reserved.\n" ++ "\n" ++ show asm) (compileStateLineNumber state)
+                   then throwCompileError ("Compiler attempted to unreserve a register (" ++ registerName register ++ ") not previously reserved.\n" ++ "\n" ++ show asm) (head (compileStateLineNumberStack state))
                    else return ()
 
                    put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextPool = updatedPool}}
@@ -4875,7 +5017,7 @@ deallocateRegisters (allocatedRegister : rest) =
            if registerName allocatedRegister == "rax"
            then do deallocateRegisters rest
            else do if not ((registerAllocations register) > 0 )
-                   then throwCompileError ("Compiler attempted to deallocate a register (" ++ registerName register ++ ") not previously allocated.\n" ++ "\n" ++ show asm) (compileStateLineNumber state)
+                   then throwCompileError ("Compiler attempted to deallocate a register (" ++ registerName register ++ ") not previously allocated.\n" ++ "\n" ++ show asm) (head (compileStateLineNumberStack state))
                    else return ()
 
                    put $ state {compileStateRegisters = (compileStateRegisters state) {cpuContextPool = updatedPool}}
@@ -4920,7 +5062,7 @@ allocateFloatRegister =
         do state <- get
            let registers = compileStateRegisters state
            if cpuContextNumFloatRegisters registers == 0
-           then throwCompileError "Out of floating point registers." (compileStateLineNumber state)
+           then throwCompileError "Out of floating point registers." (head (compileStateLineNumberStack state))
            else return ()
            let newRegisters = registers {cpuContextNumFloatRegisters = cpuContextNumFloatRegisters registers - 1}
            put $ state {compileStateRegisters = newRegisters}
@@ -4937,7 +5079,7 @@ createTempVariable name =
 
         do state <- get
            let variables = compileStateSymbols state
-               tempVariable = Variable {variableName = (map toLower name),variableType = (readVariableType name),variableIsGlobal = True}
+               tempVariable = Variable {variableName = (map toLower name),variableType = (readVariableType name),variableLineNumber = 0, variableIsGlobal = True}
            put $ state {compileStateSymbols = Map.insert (map toLower (removeTypeTag name)) tempVariable variables}
 
 isLeakyExpression :: SymbolTable -> SymbolTable -> SymbolTable -> Symbol -> Statement -> Bool
@@ -4990,9 +5132,7 @@ insertArrayAccess sourceName arguments dereference =
            dataType <- gets getDataType
 
            let name = removeTypeTag (map toLower sourceName)
-               (Array _ (VARIABLE_TYPE_ARRAY arrayType) numDimensions) = lookupVariable name symbols localSymbols nameSpace
-           
-           anticipateFatalError (head arguments)
+               (Array _ _ (VARIABLE_TYPE_ARRAY arrayType) _ numDimensions) = lookupVariable name symbols localSymbols nameSpace
            
            insertFunctionCall "access_array"
              ([createMinimalStatement EXPRESSION_IDENTIFIER [IdentifierExpression name],
@@ -5638,12 +5778,241 @@ getDataType :: CodeState -> VariableType
 getDataType CompileState {compileStateRegisters = CPUContext {cpuContextDataType = dataType}} =
         dataType
 
+putAsmDebugAnnotation :: Int -> Int -> CodeTransformation ()
+putAsmDebugAnnotation lineNumber annotationID =
+  do putAsm ["\n" ++ (constructDebugLineAnnotationName annotationID) ++ " equ " ++ show lineNumber ++ "\n",
+             (constructDebugPCAnnotationName annotationID) ++ " equ $\n\n"]
+     
+compilerNextLineNumber :: CodeTransformation ()
+compilerNextLineNumber =
+  do state <- get
+     lineNumberStack <- gets compileStateLineNumberStack
+     put state {compileStateLineNumberStack = (head lineNumberStack + 1):(tail lineNumberStack)}
 
-compilerIncrementLineNumber :: CodeTransformation ()
-compilerIncrementLineNumber =
-        do state <- get
-           put state {compileStateLineNumber = (compileStateLineNumber state) + 1}
+putDebugAnnotation :: Int -> CodeTransformation ()
+putDebugAnnotation lineNumber =
+  do state <- get
+     debug <- gets (optionDebug . configOptions . compileStateConfig)
+     if False == True
+     then do origAnnotations <- gets (debugInfoAnnotations . compileStateDebugInfo)
+             if (Seq.null origAnnotations) || peep origAnnotations
+             then do id <- compilerNextDebugAnnotationID
+                     debugInfo <- gets compileStateDebugInfo
+                     
+                     fileName <- gets (head . compileStateIncludeFileNameStack)
+                     let annotation = DebugAnnotation {debugAnnotationID = id,
+                                                       debugAnnotationFileName = map replaceAwkwardCharacter fileName,
+                                                       debugAnnotationLineNumber = lineNumber}
+                     
+                     put $ state {compileStateDebugInfo =
+                                    debugInfo {debugInfoAnnotations = 
+                                                 origAnnotations Seq.|> annotation}}
+                     addDWARFLNInstruction (DWARFLNAdvance id)
+                     putAsmDebugAnnotation lineNumber id
 
+             else return ()
+     else return ()
+
+  where peep annotations = 
+          let (_ Seq.:> a) = Seq.viewr annotations in
+              debugAnnotationLineNumber a /= lineNumber
+              
+putHorrorShow :: CodeTransformation ()
+putHorrorShow =
+  do symbols <- gets compileStateSymbols
+     types <- gets compileStateTypes
+     horrorShow <- gets (debugInfoHorrorShow . compileStateDebugInfo)
+     let arrays = Map.filter isArray symbols
+         sortedArrays = map snd (sortBy (comparing (arrayID . snd)) (Map.toAscList arrays))
+         sortedTypes = map snd (sortBy (comparing (typeID . snd)) (Map.toAscList types))
+     mapM_ (putHorrorShowCStruct horrorShow) sortedTypes
+     
+     horrorShowSetBucket "A_INCLUDES"
+     horrorShowAppendText "#include <stdio.h>\n"
+     horrorShowAppendText "void *bb_access_array(unsigned long long int *array,unsigned long long int dimensionality,...);"
+     
+     horrorShowSetBucket "B_DECLS"
+     mapM_ putDecls sortedTypes
+     mapM_ putDecls sortedArrays
+     horrorShowAppendText "\n"
+     
+     horrorShowSetBucket "C_HSFUNC"
+     horrorShowAppendText "\nvoid horrorshow(unsigned long long int *ptr)\n"
+     horrorShowAppendText "{\n"
+     horrorShowAppendText "   if(ptr == 0)\n"
+     horrorShowAppendText "   {\n"
+     horrorShowAppendText "      puts(\"  (Null)\");\n"
+     horrorShowAppendText "      return;\n\n"
+     horrorShowAppendText "   }\n\n"
+     horrorShowAppendText "   switch(*(ptr - 1))\n"
+     horrorShowAppendText "   {\n"
+     mapM_ putCase sortedTypes
+     mapM_ putCase sortedArrays
+     horrorShowAppendText "   }\n"
+     horrorShowAppendText "}\n\n"
+     
+     horrorShowSetBucket "D_TYPE_FUNCS"
+     
+     mapM_ putDebugFunction sortedTypes
+     mapM_ putDebugFunction sortedArrays
+     
+     --hs <- gets (debugInfoHorrorShow . compileStateDebugInfo)
+     --error (show hs)
+  where isArray s =
+          case s of
+            Array {} -> True
+            _ -> False
+            
+        putDecls (Type {typeName = name,typeID = id}) =
+          do horrorShowAppendText ("#define DBG_" ++ name ++ " " ++ show id ++ "\n")
+             horrorShowAppendText ("void DBG_SHOW_" ++ name ++ "(void *ptr);\n")
+
+        putDecls (Array {arrayName = name,arrayID = id}) =
+          do horrorShowAppendText ("#define DBG_" ++ name ++ " " ++ show id ++ "\n")
+             horrorShowAppendText ("void DBG_SHOW_" ++ name ++ "(void *ptr);\n")
+             
+        putCase ct =
+          do let name =
+                   case ct of
+                     Type {} -> typeName ct
+                     Array {} -> arrayName ct
+          
+             horrorShowAppendText ("     case DBG_" ++ name ++ ":\n" ++
+                                   "     {\n")
+             horrorShowAppendText ("        DBG_SHOW_" ++ name ++ "(ptr);\n")
+             horrorShowAppendText  "        break;\n"
+             horrorShowAppendText  "     }\n"
+          
+        putDebugFunction (Type {typeName = name,typeSymbols = symbols}) =
+          do let sortedFields = map snd (sortBy (comparing (fieldOffset . snd)) (Map.toAscList symbols))
+             horrorShowAppendText ("void DBG_SHOW_" ++ name ++ "(void *ptr)\n")
+             horrorShowAppendText ("{\n")
+                      
+             horrorShowAppendText ("   struct " ++ name ++ " *dbg = (struct " ++ name ++ "*)ptr;\n")
+             horrorShowAppendText ("   printf(\"  Type " ++ name ++ ":\\n\");\n")
+             mapM_ putDebugField sortedFields
+             horrorShowAppendText ("}\n\n")
+          
+             where putDebugField (Field {fieldName = name,
+                                         fieldType = VARIABLE_TYPE_INT,
+                                         fieldOffset = offset}) =
+                     do horrorShowAppendText ("   printf(\"    " ++ name ++ "%%" ++ " = %lld\\n\",dbg->" ++ name ++ ");\n")
+                     
+                   putDebugField (Field {fieldName = name,
+                                         fieldType = VARIABLE_TYPE_FLOAT,
+                                         fieldOffset = offset}) =
+                     do horrorShowAppendText ("   printf(\"    " ++ name ++ "#" ++ " = %f\\n\",dbg->" ++ name ++ ");\n")
+                   putDebugField (Field {fieldName = name,
+                                         fieldType = VARIABLE_TYPE_STRING,
+                                         fieldOffset = offset}) =
+                     do horrorShowAppendText ("   printf(\"    " ++ name ++ "$" ++ " = %s\\n\",dbg->" ++ name ++ ");\n")
+                   putDebugField (Field {fieldName = name,
+                                         fieldType = VARIABLE_TYPE_CUSTOM tName,
+                                         fieldOffset = offset}) =
+                     do horrorShowAppendText ("   printf(\"  " ++ name ++ "." ++ tName ++ " = %p\\n\",dbg->" ++ name ++ ");\n")
+
+        putDebugFunction (Array {arrayName = name,arrayType = t,arrayNumDimensions = numDimensions}) =
+          do let iteratorNames = map (\n -> "i" ++ show n) (take 16 [0,1..])
+                 dimensionNames = map (\n -> "d" ++ show n) (take 16 [0,1..])
+                 typeName =
+                   case targetType t of
+                     VARIABLE_TYPE_INT -> "long long int *"
+                     VARIABLE_TYPE_FLOAT -> "double *"
+                     VARIABLE_TYPE_STRING -> "char **"
+                     VARIABLE_TYPE_CUSTOM n -> "struct " ++ n ++ "* "
+                     
+             horrorShowAppendText ("void DBG_SHOW_" ++ name ++ "(void *ptr)\n")
+             horrorShowAppendText ("{\n")
+             horrorShowAppendText "   unsigned long long int *dimensions = ptr;\n"
+             horrorShowAppendText ("   " ++ typeName ++ " cell_addr;\n")
+             horrorShowAppendText ("   unsigned long long int " ++ intercalate ", " (take numDimensions iteratorNames) ++ ";\n")
+             horrorShowAppendText ("   unsigned long long int " ++ intercalate ", " (map (\(d,i) -> d ++ " = dimensions[-3-" ++ show i ++ "]") (take numDimensions (zip dimensionNames [0,1..]))) ++ ";\n")
+             horrorShowAppendText (concatMap generateForLoopHeader (take numDimensions [0,1..]))
+             horrorShowAppendText (concat (take (numDimensions + 1) (repeat "   ")) ++ "cell_addr = bb_access_array(ptr," ++ show numDimensions ++ "," ++ func numDimensions ++ ");\n")
+             
+             if isIntrinsicType (targetType t)
+             then do horrorShowAppendText (concat (take (numDimensions + 1) (repeat "   ")) ++ "printf(\"" ++ name ++ subscripts ++ " = " ++ format ++ "\\n\", " ++ args iteratorNames ++ ",*((" ++ typeName ++ ")(cell_addr)));\n")
+             else do horrorShowAppendText (concat (take (numDimensions + 1) (repeat "   ")) ++ "printf(\"" ++ name ++ subscripts ++ " = \\n\", " ++ args iteratorNames ++ ");\n")
+                     horrorShowAppendText (concat (take (numDimensions + 1) (repeat "   ")) ++ "horrorshow(*((" ++ typeName ++ "*)cell_addr));\n")
+             
+             horrorShowAppendText (concatMap generateForLoopFooter (take numDimensions [0,1..]))
+ 
+             horrorShowAppendText ("}\n\n")
+             
+             where format =
+                     case t of
+                       VARIABLE_TYPE_INT -> "%lld"
+                       VARIABLE_TYPE_FLOAT -> "%f"
+                       VARIABLE_TYPE_STRING -> "\"%s\""
+                       VARIABLE_TYPE_CUSTOM _ -> "%p"
+                       VARIABLE_TYPE_ARRAY tt ->
+                         case tt of
+                           VARIABLE_TYPE_INT -> "%lld"
+                           VARIABLE_TYPE_FLOAT -> "%f"
+                           VARIABLE_TYPE_STRING -> "\\\"%s\\\""
+                           VARIABLE_TYPE_CUSTOM _ -> "%p"
+                           
+                   subscripts = "(" ++ intercalate "," (take numDimensions (repeat "%lld")) ++ ")"
+                   args iteratorNames = intercalate "," (take numDimensions iteratorNames)
+                   generateForLoopHeader n =
+                     "   " ++ (concat (take n (repeat "   "))) ++ "for(i" ++ show n ++ " = 0; i" ++ show n ++ " < d" ++ show n ++ "; i" ++ show n ++ "++)\n" ++ "   " ++ (concat (take n (repeat "   "))) ++ "{\n"
+                   generateForLoopFooter n = "   " ++ concat (take (numDimensions - n - 1) (repeat "   ")) ++ "}\n"
+                   func n = intercalate "," (map (\k -> "i" ++ show k) (take numDimensions [0,1..]))
+                   
+putHorrorShowCStruct :: HorrorShow -> Symbol -> CodeTransformation ()
+putHorrorShowCStruct horrorShow symbol =
+  do case symbol of
+       Type {typeName = name,typeSymbols = symbols} ->
+         do let sortedFields = map snd (sortBy (comparing (fieldOffset . snd)) (Map.toAscList symbols))
+            horrorShowSetBucket "B_DECLS"
+            horrorShowAppendText ("struct " ++ name ++ "\n{\n")
+            mapM_ putHorrorShowCStructField sortedFields
+            horrorShowAppendText "};\n\n"
+       Array {} -> return ()
+
+putHorrorShowCStructField :: Symbol -> CodeTransformation ()
+putHorrorShowCStructField (Field {fieldName = name,fieldType = dataType}) =
+  do state <- get
+     debugInfo <- gets compileStateDebugInfo
+     let horrorShow = debugInfoHorrorShow debugInfo
+         text =
+           case dataType of
+             VARIABLE_TYPE_INT -> "    long long int " ++ name ++ ";\n"
+             VARIABLE_TYPE_FLOAT -> "    double " ++ name ++ ";\n"
+             VARIABLE_TYPE_STRING -> "    char *" ++ name ++ ";\n"
+             VARIABLE_TYPE_CUSTOM typeName -> "    struct " ++ typeName ++ " *" ++ name ++ ";\n"
+     
+     horrorShowAppendText text
+
+horrorShowSetBucket :: [Char] -> CodeTransformation ()
+horrorShowSetBucket name =
+  do state <- get
+     let debugInfo = compileStateDebugInfo state
+         horrorShow = debugInfoHorrorShow debugInfo
+         
+     put state {compileStateDebugInfo =
+                  debugInfo {debugInfoHorrorShow =
+                               horrorShow {horrorShowCurrentBucketName = name}}}
+horrorShowGetCurrentBucket :: CodeTransformation ([Char])
+horrorShowGetCurrentBucket =
+  do state <- get
+     let debugInfo = compileStateDebugInfo state
+         horrorShow = debugInfoHorrorShow debugInfo
+     return (horrorShowCurrentBucketName horrorShow)
+
+horrorShowAppendText :: [Char] -> CodeTransformation ()
+horrorShowAppendText text =
+  do state <- get
+     let debugInfo = compileStateDebugInfo state
+         horrorShow = debugInfoHorrorShow debugInfo
+         bucketName = horrorShowCurrentBucketName horrorShow
+         prevText = fromJust (Map.lookup bucketName (horrorShowBuckets horrorShow)) 
+         modifiedBuckets = Map.adjust (\_ -> prevText Seq.|> text) bucketName (horrorShowBuckets horrorShow)
+
+     put state {compileStateDebugInfo =
+                  debugInfo {debugInfoHorrorShow =
+                               horrorShow {horrorShowBuckets = modifiedBuckets}}}
+             
 throwCompileError :: String -> Int -> CodeTransformation ()
 throwCompileError msg lineNumber  =
   do state <- get

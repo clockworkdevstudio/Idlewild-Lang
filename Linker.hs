@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -31,10 +31,13 @@ module Linker where
 
 import Common
 import Options
+import SemanticsData
 
 import Data.Maybe
 import Data.List
 import Data.Char
+import qualified Data.Map as Map
+import qualified Data.Foldable as Foldable
 import System.Process
 import System.IO
 import System.Exit
@@ -47,6 +50,10 @@ import Control.Monad.Identity
 
 import Debug.Trace
 
+
+#define IWLLS "/iwlls"
+
+
 link :: CodeTransformation ()
 link =
   
@@ -57,18 +64,58 @@ link =
      verbose <- gets (optionVerbose . configOptions . linkStateConfig)
      
      console <- gets (optionConsole . configOptions . linkStateConfig)
-
+     debug <- gets (optionDebug . configOptions . linkStateConfig)
+     horrorShow <- gets (debugInfoHorrorShow . linkStateDebugInfo)
+     
+     if False
+     then do let c = concat (concatMap (Foldable.toList . snd) (Map.toAscList (horrorShowBuckets horrorShow)))
+                 horrorShowFileName = "hs.c"
+                 dbgOutputFileName = "hs.o"
+                 gccOptions = [horrorShowFileName,"-c","-T",IWL_HOME ++ IWLLS,"-fno-asynchronous-unwind-tables","-o",dbgOutputFileName, "-Wl,-rpath=.", "-lc"]
+             liftIO $ putStrLn c
+             verboseCommentary ("Generating HorrorShow debugging library...") verbose
+             outputFile <- liftIO $ openFile horrorShowFileName WriteMode
+             liftIO $ hPutStr outputFile c
+             liftIO $ hClose outputFile
+             
+             verboseCommentary ("gcc " ++ (concat (intersperse " " gccOptions)) ++ "\n") verbose
+             (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "gcc" gccOptions []
+             
+             
+             
+             
+             case exit of
+                  (ExitFailure n) -> do liftIO $ do k <- getCurrentDirectory
+                                                    putStrLn (show k)
+                                        liftIO $ putStr stdout
+                                        liftIO $ putStrLn (stderr ++ "\nUnable to generate HorrorShow debugging library (code " ++ (show n) ++ ").")
+                                        liftIO $ exitFailure
+                  _ -> do liftIO $ putStr stdout
+                          verboseCommentary ("Successful. Output file: '" ++ horrorShowFileName ++ "'.\n") verbose
+             
+             
+             
+             
+             
+             
+             
+     else return ()
+     
      verboseCommentary ("Linking...\n") verbose
      
 #if LINUX==1
-  
+
      let standardLibraryNames =
            if console
            then ["koshka.core"]
-           else ["koshka.core","koshka.mm"]
+           else ["koshka.core","koshka.mm","SDL2_gfx"]
          outputFileName = rawOutputFileName
 
-         gccOptions = [objectFileName, "-T","/usr/bin/iwls","-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+         gccOptions =
+           if False
+           then [objectFileName,"hs.o","-T",IWL_HOME ++ IWLLS,"-fno-asynchronous-unwind-tables","-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0","-lSDL2_gfx"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+           else [objectFileName,"-T",IWL_HOME ++ IWLLS,"-fno-asynchronous-unwind-tables","-o",rawOutputFileName, "-Wl,-rpath=.", "-lc", "-lm", "-lglib-2.0"] ++ (map ("-l" ++) standardLibraryNames) ++ (map ("-l" ++) libraries)
+           
      verboseCommentary ("gcc " ++ (concat (intersperse " " gccOptions)) ++ "\n") verbose
      
      (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode "gcc" gccOptions ""

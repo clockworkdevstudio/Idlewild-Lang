@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -40,6 +40,7 @@ import Options
 import Lexer
 import Parser
 
+import Numeric
 import Data.Char
 import Data.Word
 import Data.List
@@ -64,16 +65,18 @@ semantics =
      debug <- gets (optionDebug . configOptions . semanticStateConfig)
      (Statement {statementContents = (program:_)}:_)  <-  gets semanticStateProgram
      addEndFunction
-     verboseCommentary ("Populating symbol tables...\n") verbose
-     collectSymbols program
-     verboseCommentary ("Checking program semantics...\n") verbose
-     
+    
      if debug
      then do addIntrinsicTypeDIEs
      else return ()
      
-     codeSemantics program
+     verboseCommentary ("Populating symbol tables...\n") verbose
      
+     collectSymbols program
+     verboseCommentary ("Checking program semantics...\n") verbose
+     
+     codeSemantics program
+
      markStandardFunctionAsUsed "init_libkoshka_core"
      markStandardFunctionAsUsed "final_libkoshka_core"
      
@@ -82,6 +85,7 @@ semantics =
              markStandardFunctionAsUsed "final_libkoshka_mm"
      else return ()
      
+     markStandardFunctionAsUsed "anticipate_fatal_error"
      markStandardFunctionAsUsed "fatal_error"
      
      markStandardFunctionAsUsed "create_linked_list"
@@ -127,6 +131,7 @@ semantics =
      --markStandardFunctionAsUsed "free_strings"
 
      includeFileNameStack <- gets semanticStateIncludeFileNameStack
+     includeFileNames <- gets semanticStateIncludeFileNames
      program <- gets semanticStateProgram
      symbols <- gets semanticStateSymbols
      ints <- gets semanticStateInts
@@ -138,7 +143,8 @@ semantics =
      let options = configOptions config
 
      put CompileState
-           {compileStateIncludeFileNameStack = includeFileNameStack,
+           {compileStateIncludeFileNameStack = [], --includeFileNameStack,
+            compileStateIncludeFileNames = includeFileNames,
             compileStateProgram = program,
             compileStateAsm = createAsm,
             compileStateSymbols = symbols,
@@ -151,14 +157,14 @@ semantics =
             compileStateExitLabelIDs = [],
             compileStateDebugInfo = debugInfo,
             compileStateRegisters = createCPUContext (numPreservedRegisters - 1),
-            compileStateLineNumber = 1,
+            compileStateLineNumberStack = [1],
             compileStateLabelID = 0,
             compileStateConfig = config
            }
      
 addEndFunction :: CodeTransformation ()
 addEndFunction =
-  do let end = createUserFunction "end" VARIABLE_TYPE_INT [(Parameter "exit_code" VARIABLE_TYPE_INT (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 0]))] 1 0 1 0 0 Map.empty
+  do let end = createUserFunction "end" VARIABLE_TYPE_INT [(Parameter "exit_code" VARIABLE_TYPE_INT 0 (createMinimalStatement EXPRESSION_INT_CONSTANT [IntConstantExpression 0]))] 1 0 1 0 0 Map.empty
      addFunction end "end"
 
 semanticsPushIncludeFileName :: String -> CodeTransformation ()
@@ -172,6 +178,25 @@ semanticsPopIncludeFileName =
   do state <- get
      put $ state {semanticStateIncludeFileNameStack =
                   tail (semanticStateIncludeFileNameStack state)}
+
+semanticsPushLineNumber :: CodeTransformation ()
+semanticsPushLineNumber =
+  do state <- get
+     origStack <- gets semanticStateLineNumberStack
+     put state {semanticStateLineNumberStack = (1:origStack)}
+
+semanticsPopLineNumber :: CodeTransformation ()
+semanticsPopLineNumber =
+  do state <- get
+     origStack <- gets semanticStateLineNumberStack
+     put state {semanticStateLineNumberStack = (tail origStack)}
+
+semanticsNextCompositeTypeID :: CodeTransformation (Int)
+semanticsNextCompositeTypeID =
+  do state <- get
+     id <- gets semanticStateCompositeTypeID
+     put state {semanticStateCompositeTypeID = id + 1}
+     return id
 
 codeSemantics :: Statement -> CodeTransformation ()
 codeSemantics (Statement {statementContents = statements})
@@ -188,6 +213,7 @@ codeSemantics (Statement {statementContents = statements})
               semanticFunc = case statementID statement of
                                   STATEMENT_BEGINNING_OF_FILE -> beginningOfFileSemantics
                                   STATEMENT_END_OF_FILE -> endOfFileSemantics
+                                  STATEMENT_NEWLINE -> newLineSemantics
                                   STATEMENT_CODE -> codeSemantics
                                   STATEMENT_TYPE -> typeSemantics
                                   STATEMENT_INSERT_BEFORE -> insertSemantics
@@ -222,11 +248,19 @@ codeSemantics (Statement {statementContents = statements})
 beginningOfFileSemantics :: Statement -> CodeTransformation ()
 beginningOfFileSemantics (Statement {statementContents = (IdentifierExpression fileName:_)}) =
   do semanticsPushIncludeFileName fileName
+     semanticsPushLineNumber
 
 endOfFileSemantics :: Statement -> CodeTransformation ()
 endOfFileSemantics _ =
   do semanticsPopIncludeFileName
+     semanticsPopLineNumber
 
+newLineSemantics :: Statement -> CodeTransformation ()
+newLineSemantics statement =
+  do state <- get
+     origStack <- gets semanticStateLineNumberStack
+     put state {semanticStateLineNumberStack = ((statementLineNumber statement + 1):tail origStack)}
+  
 collectSymbols :: Statement -> CodeTransformation ()
 collectSymbols (Statement {statementContents = statements})
 
@@ -272,13 +306,10 @@ collectSymbols (Statement {statementContents = statements})
 
 typeSemantics :: Statement -> CodeTransformation ()
 typeSemantics (Statement {statementContents = (Statement {statementContents = (typeName:_)}):fieldNames}) =
-  do debug <- gets (optionDebug . configOptions . semanticStateConfig)
-     types <- gets semanticStateTypes
+  do types <- gets semanticStateTypes
      let sourceName = identifierExpressionValue (getInitialStatement typeName)
          customType = Map.lookup (map toLower (removeTypeTag sourceName)) types
-     if debug
-     then do putDWARFType (fromJust customType)
-     else return ()
+     return ()
      
 dimStatementSemantics :: Statement -> CodeTransformation ()
 dimStatementSemantics (Statement {statementContents = expressionList}) =
@@ -288,7 +319,8 @@ dimStatementSemantics (Statement {statementContents = expressionList}) =
 dimSemantics :: Statement -> CodeTransformation ()
 dimSemantics arrayDeclaration = 
 
-  do symbols <- gets semanticStateSymbols
+  do debug <- gets (optionDebug . configOptions . semanticStateConfig)
+     symbols <- gets semanticStateSymbols
      let (identifier,dimensions) = getFunctionCallOperands (statementContents (getInitialStatement arrayDeclaration))
          sourceName = identifierExpressionValue (getInitialStatement identifier)
          name = removeTypeTag (map toLower sourceName)
@@ -301,12 +333,16 @@ dimSemantics arrayDeclaration =
 
          throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") arrayDeclaration
 
-       (Array {arrayName = name, arrayType = dataType, arrayNumDimensions = numDimensions}) ->
+       (Array {arrayName = name,arrayType = dataType, arrayNumDimensions = numDimensions}) ->
 
          if length dimensions /= numDimensions
          then throwSemanticError ("Array '" ++ name ++ "': originally declared as having " ++ (show numDimensions) ++ " dimension(s); now referenced as having " ++ (show (length dimensions)) ++ " dimension(s).") arrayDeclaration
          else return ()
-
+         
+         {--if debug
+         then putDWARFArray dataType
+         else return ()
+--}
 collectSysSymbols :: Statement -> CodeTransformation ()
 collectSysSymbols (Statement {statementContents = statements}) =
   
@@ -336,13 +372,15 @@ collectSysSymbols (Statement {statementContents = statements}) =
      then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") identifier
      else return ()
 
-     addFunction (createLibraryFunction name (readVariableType sourceName) (map (extractParameter symbols) parameters)) name
+     addFunction (createLibraryFunction name (readVariableType sourceName) (map (extractParameter symbols) (zip parameters [0,1..]))) name
 
 collectTypeSymbols :: Statement -> CodeTransformation ()
-collectTypeSymbols (Statement {statementContents = (Statement {statementContents = (typeName:_)}):fieldNames}) =
-  do let sourceName = identifierExpressionValue (getInitialStatement typeName)
+collectTypeSymbols (Statement {statementContents = (Statement {statementContents = (typeName:_)}):fieldNames,statementLineNumber = lineNumber}) =
+  do id <- semanticsNextCompositeTypeID
+     debug <- gets (optionDebug . configOptions . semanticStateConfig)
+     let sourceName = identifierExpressionValue (getInitialStatement typeName)
          name = map toLower sourceName
-         newCustomType = Type {typeName = sourceName,typeSize = 0,typeSymbols = Map.empty}
+         newCustomType = Type {typeName = sourceName,typeID = id,typeSize = 0,typeSymbols = Map.empty,typeLineNumber = lineNumber}
 
      if name /= removeTypeTag name
      then throwSemanticError ("Illegal Type name '" ++ sourceName ++ "'.") typeName
@@ -350,13 +388,18 @@ collectTypeSymbols (Statement {statementContents = (Statement {statementContents
 
      customType <- collectFieldSymbols newCustomType fieldNames 0
      addType customType name
-     
+
+     if debug
+     then do putDWARFType customType
+     else return ()
+
 collectFieldSymbols :: Symbol -> [Statement] -> Int -> CodeTransformation Symbol
 collectFieldSymbols customType (statement:rest) depth =
   do types <- gets semanticStateTypes
      let typeSourceName = typeName customType
          thisTypeName = map toLower typeSourceName
          fieldName = getInitialStatement statement
+         lineNumber = statementLineNumber statement
          sourceName = identifierExpressionValue (getInitialStatement fieldName)
          name = removeTypeTag (map toLower sourceName)
          symbols = typeSymbols customType
@@ -369,7 +412,7 @@ collectFieldSymbols customType (statement:rest) depth =
              return NO_NAMESPACE
      else return NO_NAMESPACE
 
-     let withSymbol = customType {typeSymbols = Map.insert name (Field name (readVariableType sourceName) size) symbols}
+     let withSymbol = customType {typeSymbols = Map.insert name (Field (removeTypeTag sourceName) (readVariableType sourceName) lineNumber size) symbols}
      collectFieldSymbols withSymbol rest (depth + 1)
 
 collectFieldSymbols customType _ depth =
@@ -386,6 +429,7 @@ collectDimSymbol array =
   do symbols <- gets semanticStateSymbols
      let (identifier,dimensions) = getFunctionCallOperands (statementContents (getInitialStatement array))
          sourceName = identifierExpressionValue (getInitialStatement identifier)
+         lineNumber = statementLineNumber array
          name = removeTypeTag (map toLower sourceName)
          symbolContainer = Map.lookup name symbols
          symbol = fromJust symbolContainer
@@ -399,7 +443,8 @@ collectDimSymbol array =
                
                _ -> throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") array
 
-     else addVariable (Array name (VARIABLE_TYPE_ARRAY (readVariableType sourceName)) (length dimensions))
+     else do id <- semanticsNextCompositeTypeID
+             addVariable (Array (removeTypeTag sourceName) id (VARIABLE_TYPE_ARRAY (readVariableType sourceName)) lineNumber (length dimensions))
 
 collectLabelSymbol :: Statement -> CodeTransformation ()
 collectLabelSymbol statement = 
@@ -408,6 +453,7 @@ collectLabelSymbol statement =
      nameSpace <- gets semanticStateNameSpace
 
      let name = map toLower sourceName
+         lineNumber = statementLineNumber statement
          (IdentifierExpression {identifierExpressionValue = sourceName}) = getInitialStatement statement
          globalSymbolContainer = Map.lookup name
 
@@ -416,12 +462,12 @@ collectLabelSymbol statement =
                  symbol = fromJust symbolContainer
              if symbolContainer /= Nothing
              then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") statement
-             else addLabel (Label (tail name))
+             else addLabel (Label (tail sourceName) lineNumber)
      else do let symbolContainer = Map.lookup name localSymbols
                  symbol = fromJust symbolContainer
              if symbolContainer /= Nothing
              then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") statement
-             else addLabel (Label (tail name))
+             else addLabel (Label (tail sourceName) lineNumber)
 
 collectGotoLabelSymbol :: Statement -> CodeTransformation ()
 collectGotoLabelSymbol statement =
@@ -429,12 +475,13 @@ collectGotoLabelSymbol statement =
         do let (Statement {statementContents = (destination:_)}) = getInitialStatement statement
                sourceName = identifierExpressionValue destination
                name = map toLower sourceName
+               lineNumber = statementLineNumber statement
            
            symbols <- gets semanticStateSymbols
            localSymbols <- gets semanticStateLocalSymbols
            
            if Map.lookup name symbols == Nothing && Map.lookup name localSymbols == Nothing
-           then addLabel (Label name)
+           then addLabel (Label name lineNumber)
            else return ()
 
 insertSemantics :: Statement -> CodeTransformation ()
@@ -537,6 +584,7 @@ fieldAccessExpressionSemantics (Statement {statementID = EXPRESSION_FIELD_ACCESS
             return fieldDataType
        EXPRESSION_FIELD_ACCESS ->
          do leftOperandType <- fieldAccessExpressionSemantics leftOperand
+            
             let sourceFieldName = identifierExpressionValue (getInitialStatement rightOperand)
                 fieldName = map toLower (removeTypeTag sourceFieldName)
                 typeContainer = Map.lookup (map toLower (customTypeName leftOperandType)) types
@@ -544,7 +592,8 @@ fieldAccessExpressionSemantics (Statement {statementID = EXPRESSION_FIELD_ACCESS
                 typeFields = typeSymbols type_
                 fieldContainer = Map.lookup fieldName typeFields
                 field = fromJust fieldContainer
-                fieldDataType = fieldType field            
+                fieldDataType = fieldType field   
+            
             if isIntrinsicType leftOperandType
             then do _ <- throwSemanticError "Intrinsic type field treated as custom type field." leftOperand
                     return VARIABLE_TYPE_VOID
@@ -570,7 +619,7 @@ fieldAccessExpressionSemantics (Statement {statementID = EXPRESSION_FIELD_ACCESS
                 fieldContainer = Map.lookup fieldName typeFields
                 field = fromJust fieldContainer
                 fieldDataType = fieldType field            
-
+            
             if variableContainer == Nothing
             then do _ <- throwSemanticError ("Attempt to access field '" ++ sourceFieldName ++ "' of element from undeclared custom type array '" ++ sourceName ++ "'.")  leftOperand
                     return VARIABLE_TYPE_VOID
@@ -588,7 +637,8 @@ fieldAccessExpressionSemantics (Statement {statementID = EXPRESSION_FIELD_ACCESS
             then do _ <- throwSemanticError ("Type '" ++ typeName type_ ++ "' does not have a field named '" ++ sourceFieldName ++ "'.") rightOperand
                     return VARIABLE_TYPE_VOID            
             else return VARIABLE_TYPE_VOID
-
+            return fieldDataType
+       q -> error (show q)
 expressionSemantics :: Statement -> CodeTransformation ()
 expressionSemantics (Statement {statementID = STATEMENT_EXPRESSION,
                                 statementContents = (expression:_)}) =
@@ -631,18 +681,22 @@ identifierExpressionSemantics (Statement {statementID = EXPRESSION_IDENTIFIER,
              then do addVariable
                       (Variable {variableName = name,
                                  variableType = (readVariableType sourceName),
+                                 variableLineNumber = lineNumber,
                                  variableIsGlobal = False})
              else do checkSymbolUsage symbol sourceName statement
      else do let symbol = fromJust symbolContainer
                  localSymbol = fromJust localSymbolContainer
                  offset = (-8) * ((numPreservedRegisters - 1) + functionNumLocals nameSpace + 1)
+                 index = Map.size (functionSymbols nameSpace)
 
              if localSymbolContainer == Nothing
              then if symbolContainer == Nothing || (not (isGlobal symbol || isArray symbol || isConst symbol))
                   then do addLocalAutomaticVariable
                             (LocalAutomaticVariable {localAutomaticVariableName = sourceName,
                                                      localAutomaticVariableType = (readVariableType sourceName),
+                                                     localAutomaticVariableLineNumber = lineNumber,
                                                      localAutomaticVariableIsArgument = False,
+                                                     localAutomaticVariableIndex = index,
                                                      localAutomaticVariableAddress = offset})
                   else do checkSymbolUsage symbol sourceName statement
              else do checkSymbolUsage localSymbol sourceName statement
@@ -670,7 +724,8 @@ identifierExpressionSemantics (Statement {statementID = EXPRESSION_IDENTIFIER,
                   if hasTypeTag sourceName && dataType /= readVariableType sourceName
                   then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") statement
                   else do return ()
-
+               _ -> return ()
+               
                Function {functionName = sourceName} -> 
                   
                   throwSemanticError ("Illegal use of function name '" ++ sourceName ++ "'.") statement
@@ -917,7 +972,7 @@ genericExpressionSemantics expression
                    else throwSemanticError ("Function '" ++ sourceName ++ "': originally declared as having between " ++ show minNumArguments ++ " and " ++ show maxNumArguments ++ " parameter(s); now referenced as having " ++ (show numArguments) ++ " parameter(s).") expression
               else mapM_ expressionSemantics arguments
          
-         (Array name dataType numDimensions) ->
+         (Array name _ dataType _ numDimensions) ->
 
            do if numArguments /= numDimensions
               then throwSemanticError ("Array '" ++ name ++ "': originally declared as having " ++ (show numDimensions) ++ " dimension(s); now referenced as having " ++ (show numArguments) ++ " dimension(s).") identifier
@@ -1056,7 +1111,8 @@ forSemantics (Statement {statementContents = statements}) =
            decrementLoopDepth
 
 forEachSemantics :: Statement -> CodeTransformation ()
-forEachSemantics (Statement {statementContents = statements}) =
+forEachSemantics (Statement {statementContents = statements,
+                             statementLineNumber = lineNumber}) =
 
         do incrementLoopDepth
            symbols <- gets semanticStateSymbols
@@ -1064,7 +1120,8 @@ forEachSemantics (Statement {statementContents = statements}) =
            types <- gets semanticStateTypes
            nameSpace <- gets semanticStateNameSpace
 
-           let (Statement {statementContents = (initialiserExpression:_)}:code:_) = statements
+           let (Statement {statementContents = (initialiserExpression:_),
+                           statementLineNumber = lineNumber}:code:_) = statements
                initialiser = getInitialStatement initialiserExpression
                (leftOperand,rightOperand) = getBinaryOperands (statementContents initialiser)
                sourceIteratorName = getIdentifierValue leftOperand
@@ -1097,12 +1154,16 @@ forEachSemantics (Statement {statementContents = statements}) =
                                     then do addVariable
                                               (Variable {variableName = iteratorName,
                                                          variableType = readVariableType sourceIteratorName,
+                                                         variableLineNumber = lineNumber,
                                                          variableIsGlobal = False})
                                     else do let offset = (-8) * ((numPreservedRegisters - 1) + functionNumLocals nameSpace + 1)
+                                                index = Map.size (functionSymbols nameSpace)
                                             addLocalAutomaticVariable
                                               (LocalAutomaticVariable {localAutomaticVariableName = sourceIteratorName,
                                                                        localAutomaticVariableType = (readVariableType sourceIteratorName),
+                                                                       localAutomaticVariableLineNumber = lineNumber,
                                                                        localAutomaticVariableIsArgument = False,
+                                                                       localAutomaticVariableIndex = index,
                                                                        localAutomaticVariableAddress = offset})
            else do let type_ =
                          case fromJust variableContainer of
@@ -1199,11 +1260,12 @@ labelSemantics statement =
   
   do let name = map toLower sourceName
          (IdentifierExpression {identifierExpressionValue = sourceName}) = getInitialStatement statement
+         lineNumber = statementLineNumber statement
      symbols <- gets semanticStateSymbols
      localSymbols <- gets semanticStateLocalSymbols
            
      if Map.lookup name symbols == Nothing && Map.lookup name localSymbols == Nothing
-     then do addLabel (Label (tail name))
+     then do addLabel (Label (tail sourceName) lineNumber)
      else throwSemanticError ("Duplicate label '" ++ show name ++ "'.") statement
 
 dataLabelSemantics = labelSemantics
@@ -1266,7 +1328,7 @@ collectFunctionSymbols (Statement {statementContents = statements}) =
            then throwSemanticError ("Duplicate identifier '" ++ sourceName ++ "'.") identifier
            else return ()
 
-           let combinedArguments = zip (map (extractParameter symbols) parameters) parameters
+           let combinedArguments = zip (map (extractParameter symbols) (zip parameters [0,1..])) parameters
 #if LINUX==1 || MAC_OS==1
                registerArguments = extractRegisterArguments combinedArguments 0 0 0
                stackArguments = extractStackArguments combinedArguments 0 0 0
@@ -1274,15 +1336,16 @@ collectFunctionSymbols (Statement {statementContents = statements}) =
                registerArguments = extractRegisterArguments combinedArguments
                stackArguments = extractStackArguments combinedArguments
 #endif
-               registerSymbols = (zip (map parameterNameFromStatement (map snd registerArguments)) (map extractSymbol (zip (map snd registerArguments) registerArgumentOffsets)))
-               stackSymbols = (zip (map parameterNameFromStatement (map snd stackArguments)) (map extractSymbol (zip (map snd stackArguments) stackArgumentOffsets)))
+               registerSymbols = (zip (map parameterNameFromStatement (map snd registerArguments)) (map extractSymbol (zip registerArguments registerArgumentOffsets)))
+               stackSymbols = (zip (map parameterNameFromStatement (map snd stackArguments)) (map extractSymbol (zip stackArguments stackArgumentOffsets)))
                functionSymbolTable = Map.fromList (registerSymbols ++ stackSymbols)
+
 
                registerArgumentOffsets = map (((-8) *) . (numPreservedRegisters +)) (take (length registerArguments) [0,1..])
                stackArgumentOffsets = map ((8 *) . (2 + sizeOfShadowSpace +)) (take (length stackArguments) [0,1..])
 
-           let function = createUserFunction name (readVariableType sourceName) (map (extractParameter symbols) parameters) (length requiredParameters + length optionalParameters) (length requiredParameters) (length registerArguments) (length stackArguments) (length registerArguments) functionSymbolTable
-           collectSymbols definition
+           let function = createUserFunction name (readVariableType sourceName) (map (extractParameter symbols) (zip parameters [0,1..])) (length requiredParameters + length optionalParameters) (length requiredParameters) (length registerArguments) (length stackArguments) (length registerArguments) functionSymbolTable
+           collectSymbols definition 
            addFunction function name
 
 functionSemantics :: Statement -> CodeTransformation ()
@@ -1290,7 +1353,8 @@ functionSemantics (Statement {statementContents = statements}) =
 
   do symbols <- gets semanticStateSymbols
      localSymbols <- gets semanticStateLocalSymbols
-
+     debug <- gets (optionDebug . configOptions . semanticStateConfig)
+     
      let (Statement {statementContents = (identifier:_)}:prototype:code:_) = statements
          sourceName = identifierExpressionValue (getInitialStatement identifier)
          name = removeTypeTag (map toLower sourceName)               
@@ -1304,6 +1368,13 @@ functionSemantics (Statement {statementContents = statements}) =
      codeSemantics code
      setSemanticStateLocalSymbols localSymbols
      setSemanticStateNameSpace originalNameSpace
+
+     symbols <- gets semanticStateSymbols
+     let function = fromJust (Map.lookup name symbols)
+         
+     if debug
+     then do putDWARFFunction function
+     else return ()
 
 parameterNameFromStatement :: Statement -> String                 
 parameterNameFromStatement statement =
@@ -1321,20 +1392,22 @@ parameterTypeFromStatement statement =
       let (leftOperand,_) = getBinaryOperands (statementContents (getInitialStatement statement)) in
       readVariableType (getIdentifierValue leftOperand)
 
-extractParameter :: SymbolTable -> Statement -> Parameter
-extractParameter symbols statement =
+extractParameter :: SymbolTable -> (Statement,Int) -> Parameter
+extractParameter symbols (statement,index) =
   case statementID (getInitialStatement statement) of
     EXPRESSION_IDENTIFIER ->
-      Parameter (parameterNameFromStatement statement) (parameterTypeFromStatement statement) EmptyStatement
+      Parameter (parameterNameFromStatement statement) (parameterTypeFromStatement statement) index EmptyStatement
     EXPRESSION_EQUAL_TO -> 
       let (_,rightOperand) = getBinaryOperands (statementContents (getInitialStatement statement)) in
-      Parameter (parameterNameFromStatement statement) (parameterTypeFromStatement statement) (reduceConstantExpression rightOperand symbols Map.empty)
+      Parameter (parameterNameFromStatement statement) (parameterTypeFromStatement statement) index (reduceConstantExpression rightOperand symbols Map.empty)
 
-extractSymbol :: (Statement,Int) -> Symbol
-extractSymbol (statement, address) =
+extractSymbol :: ((Parameter,Statement),Int) -> Symbol
+extractSymbol ((parameter,statement),address) =
   LocalAutomaticVariable {localAutomaticVariableName = (parameterNameFromStatement statement),
                           localAutomaticVariableType = (parameterTypeFromStatement statement),
+                          localAutomaticVariableLineNumber = 0,
                           localAutomaticVariableIsArgument = True,
+                          localAutomaticVariableIndex = parameterIndex parameter,
                           localAutomaticVariableAddress = address}
   
 defaultArgumentIsConstant :: SymbolTable -> Statement -> Bool
@@ -1378,7 +1451,8 @@ globalSemantics Statement {statementContents = expressionList} =
   do mapM_ globalVariableDeclarationSemantics expressionList
 
 globalVariableDeclarationSemantics :: Statement -> CodeTransformation ()
-globalVariableDeclarationSemantics Statement {statementContents = (expression:_)} =
+globalVariableDeclarationSemantics Statement {statementContents = (expression:_),
+                                              statementLineNumber = lineNumber} =
   do symbols <- gets semanticStateSymbols
      nameSpace <- gets semanticStateNameSpace
      types <- gets semanticStateTypes
@@ -1400,6 +1474,7 @@ globalVariableDeclarationSemantics Statement {statementContents = (expression:_)
 
                  addVariable (Variable {variableName = sourceName,
                                         variableType = (readVariableType sourceName),
+                                        variableLineNumber = lineNumber,
                                         variableIsGlobal = True})
             EXPRESSION_ASSIGN ->
 
@@ -1421,6 +1496,7 @@ globalVariableDeclarationSemantics Statement {statementContents = (expression:_)
 
                  addVariable (Variable {variableName = sourceName,
                                         variableType = (readVariableType sourceName),
+                                        variableLineNumber = lineNumber,
                                         variableIsGlobal = True})
 
      else throwSemanticError ("Attempt to declare a global variable in a local namespace.") expression
@@ -1430,10 +1506,12 @@ localSemantics Statement {statementContents = expressionList} =
   do mapM_ localVariableDeclarationSemantics expressionList
 
 localVariableDeclarationSemantics :: Statement -> CodeTransformation ()
-localVariableDeclarationSemantics Statement {statementContents = (expression:_)} =
+localVariableDeclarationSemantics Statement {statementContents = (expression:_),
+                                             statementLineNumber = lineNumber} =
   do symbols <- gets semanticStateSymbols
      types <- gets semanticStateTypes
      nameSpace <- gets semanticStateNameSpace
+     let index = Map.size (functionSymbols nameSpace)
      if nameSpace == NO_NAMESPACE
      then case statementID expression of
             EXPRESSION_IDENTIFIER ->
@@ -1452,6 +1530,7 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
 
                  addVariable (Variable {variableName = name,
                                         variableType = (readVariableType sourceName),
+                                        variableLineNumber = lineNumber,
                                         variableIsGlobal = False})
             EXPRESSION_ASSIGN ->
 
@@ -1473,6 +1552,7 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
                
                  addVariable (Variable {variableName = name,
                                         variableType = (readVariableType sourceName),
+                                        variableLineNumber = lineNumber,
                                         variableIsGlobal = False})
 
      else case statementID expression of
@@ -1494,7 +1574,9 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
                  addLocalAutomaticVariable
                    (LocalAutomaticVariable {localAutomaticVariableName = name,
                                             localAutomaticVariableType = (readVariableType sourceName),
+                                            localAutomaticVariableLineNumber = lineNumber,
                                             localAutomaticVariableIsArgument = False,
+                                            localAutomaticVariableIndex = index,
                                             localAutomaticVariableAddress = offset})
 
             EXPRESSION_ASSIGN ->
@@ -1519,7 +1601,9 @@ localVariableDeclarationSemantics Statement {statementContents = (expression:_)}
                  addLocalAutomaticVariable
                    (LocalAutomaticVariable {localAutomaticVariableName = name,
                                             localAutomaticVariableType = (readVariableType sourceName),
+                                            localAutomaticVariableLineNumber = lineNumber,
                                             localAutomaticVariableIsArgument = False,
+                                            localAutomaticVariableIndex = index,
                                             localAutomaticVariableAddress = offset})
 
 functionReturnSemantics :: Statement -> CodeTransformation ()
@@ -1620,23 +1704,38 @@ addConst (Const {constName = name,
        VARIABLE_TYPE_INT -> addInt int
        VARIABLE_TYPE_FLOAT -> addFloat float
        VARIABLE_TYPE_STRING -> addString string
-
+       
 addVariable :: Symbol -> CodeTransformation ()
 addVariable (Variable {variableName = name,
                        variableType = dataType,
-                       variableIsGlobal = isGlobal}) =
+                       variableLineNumber = lineNumber,
+                       variableIsGlobal = isGlobal})=
         do state <- get
-           put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) (Variable {variableName = name, variableType = dataType, variableIsGlobal = isGlobal}) (semanticStateSymbols state))}
+           let symbol =
+                 Variable {variableName = name,
+                           variableType = dataType,
+                           variableLineNumber = lineNumber,
+                           variableIsGlobal = isGlobal}
+           put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) symbol (semanticStateSymbols state))}
            if (optionDebug . configOptions . semanticStateConfig) state
-           then do putDWARFVariable name dataType
+           then do putDWARFVariable symbol
            else return ()
-           
+                     
 addVariable (Array {arrayName = name,
+                    arrayID = id,
                     arrayType = dataType,
+                    arrayLineNumber = lineNumber,
                     arrayNumDimensions = numDimensions}) =
         do state <- get
-           put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) (Array {arrayName = name, arrayType = dataType, arrayNumDimensions = numDimensions}) (semanticStateSymbols state))}
-
+           let symbol =
+                 Array {arrayName = name,
+                        arrayType = dataType,
+                        arrayLineNumber = lineNumber}
+           put state {semanticStateSymbols = (Map.insert (removeTypeTag (map toLower name)) (Array {arrayName = name, arrayID = id,arrayType = dataType, arrayNumDimensions = numDimensions}) (semanticStateSymbols state))}
+           if (optionDebug . configOptions . semanticStateConfig) state
+           then do putDWARFVariable symbol
+           else return ()
+           
 addLocalAutomaticVariable :: Symbol -> CodeTransformation ()
 addLocalAutomaticVariable symbol =
   do symbols <- gets semanticStateSymbols
@@ -1646,7 +1745,7 @@ addLocalAutomaticVariable symbol =
      setSemanticStateNameSpace newFunction
      setSemanticStateLocalSymbols (functionSymbols newFunction)
      setSemanticStateSymbols newSymbols
-
+     
 addLabel :: Symbol -> CodeTransformation ()
 addLabel newLabel =
   do symbols <- gets semanticStateSymbols
@@ -2065,11 +2164,7 @@ nonArithmeticShiftR l r =
   where clearMostSignificantBits value n =
           if n < 0
           then value
--- #if LINUX==1
---          else clearMostSignificantBits (clearBit value ((bitSize value) - n)) (n - 1)
--- #elif WINDOWS==1
           else clearMostSignificantBits (clearBit value ((fromJust (bitSizeMaybe value)) - n)) (n - 1)
--- #endif
 
 reductionTypeFilter :: Statement -> VariableType -> VariableType -> Statement
 reductionTypeFilter statement destType sourceType
@@ -2476,7 +2571,8 @@ createAsm =
                            (debug_info_, createAsmBucket),
                            (debug_abbrev_, createAsmBucket),
                            (debug_line_, createAsmBucket),
-                           (debug_str_, createAsmBucket)])
+                           (debug_str_, createAsmBucket),
+                           (debug_frame_, createAsmBucket)])
 
 createAsmBucket :: AsmBucket
 createAsmBucket = AsmBucket Seq.empty
@@ -2491,7 +2587,90 @@ setSemanticStateSymbols symbolTable =
   do state <- get
      put state {semanticStateSymbols = symbolTable}
  
-variableTypeToDWARFCrossReference :: VariableType -> CodeTransformation (Int)
+decorateVariableName :: String -> SymbolTable -> SymbolTable -> Symbol -> String
+decorateVariableName sourceName symbols localSymbols nameSpace =
+
+        let name = removeTypeTag (map toLower sourceName)
+            symbol = lookupVariable name symbols localSymbols nameSpace in
+ 
+        case symbol of
+             (Const {constType = VARIABLE_TYPE_INT}) -> "BBci_" ++ name
+             (Const {constType = VARIABLE_TYPE_FLOAT}) -> "BBcf_" ++ name
+             (Const {constType = VARIABLE_TYPE_STRING}) -> "BBcs_" ++ name
+             (Variable {variableType = VARIABLE_TYPE_INT}) -> "BBi_" ++ name
+             (Variable {variableType = VARIABLE_TYPE_FLOAT}) -> "BBf_" ++ name
+             (Variable {variableType = VARIABLE_TYPE_STRING}) -> "BBs_" ++ name
+             (Variable {variableType = VARIABLE_TYPE_CUSTOM {customTypeName = typeName}}) -> "BBc_" ++ typeName ++ "_" ++ name
+             (LocalAutomaticVariable {localAutomaticVariableAddress = offset}) -> "rbp + " ++ (show offset)
+             (Array {}) -> "BBa_" ++ takeWhile isAlphaUnderscore name
+             k -> error ("Critical error in decorateVariableName.")
+        where isAlphaUnderscore char = isAlpha (char) || char == '_'
+
+decorateLabelName :: String -> String
+decorateLabelName string = ".BBlabel_" ++ string
+
+decorateLinkedListName :: String -> String
+decorateLinkedListName string = "BB_LL_" ++ (map toLower string)
+
+decorateTypeStringOffsetsName :: String -> String
+decorateTypeStringOffsetsName string = "BB_STRINGS_" ++ (map toLower string)
+
+
+
+addDWARFDIE :: [Char] -> DWARFAbbreviation -> [DWARFAttribute] -> CodeTransformation ()
+addDWARFDIE key abbrev attributes =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     offset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     let size = calculateDWARFDIESize abbrev attributes
+         die = DWARFDIE
+                 key
+                 (abbreviationCode abbrev)
+                 (abbreviationHasChildren abbrev)
+                 attributes
+                 size
+                 offset
+         dies = debugInfoDIEs debugInfo
+     
+     put state {semanticStateDebugInfo =
+                  debugInfo {debugInfoDIEs = Map.insert key die dies}}
+     adjustDWARFDIEOffset size
+     
+addDWARFNullDIE :: CodeTransformation ()
+addDWARFNullDIE =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     offset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     let key = "__DIE_NULL" ++ show offset
+         die = DWARFDIE key 0 False [] 1 offset
+         dies = debugInfoDIEs debugInfo
+     
+     put state {semanticStateDebugInfo =
+                  debugInfo {debugInfoDIEs = Map.insert key die dies}}
+     adjustDWARFDIEOffset 1
+     
+calculateDWARFDIESize :: DWARFAbbreviation -> [DWARFAttribute] -> Int
+calculateDWARFDIESize abbrev attributes =
+  length (uLEB128 (encodeUnsignedLEB128 (abbreviationCode abbrev))) + (foldr (\at ac -> dwarfGenericAttributeSize at + ac) 0 attributes)
+
+dwarfGenericAttributeSize :: DWARFAttribute -> Int
+dwarfGenericAttributeSize (DWARFAttribute1 _) = 1
+dwarfGenericAttributeSize (DWARFAttribute2 _) = 2
+dwarfGenericAttributeSize (DWARFAttribute4 _) = 4
+dwarfGenericAttributeSize (DWARFAttribute8 _) = 8
+dwarfGenericAttributeSize (DWARFCrossReferenceAttribute _) = 4
+dwarfGenericAttributeSize (DWARFVariableLengthAttribute size _) = size
+
+adjustDWARFDIEOffset :: Int -> CodeTransformation ()
+adjustDWARFDIEOffset adjustment =
+  do state <- get
+     debugInfo <- gets semanticStateDebugInfo
+     offset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     put state {semanticStateDebugInfo =
+                  debugInfo {debugInfoDIEOffset = offset + adjustment}}
+
+
+variableTypeToDWARFCrossReference :: VariableType -> CodeTransformation ([Char])
 variableTypeToDWARFCrossReference dataType =
   do dwarfDIEs <- gets (debugInfoDIEs . semanticStateDebugInfo)
      let dieKey = 
@@ -2499,8 +2678,15 @@ variableTypeToDWARFCrossReference dataType =
              VARIABLE_TYPE_INT -> "__DIE_BASE_TYPE_INT"
              VARIABLE_TYPE_FLOAT -> "__DIE_BASE_TYPE_FLOAT"
              VARIABLE_TYPE_STRING -> "__DIE_BASE_TYPE_STRING"
-             
-     return (dwarfDIEOffset (fromJust (Map.lookup dieKey dwarfDIEs)))
+             VARIABLE_TYPE_CUSTOM name -> "__DIE_POINTER_TYPE_" ++ name
+             VARIABLE_TYPE_ARRAY targetType -> "__DIE_POINTER_TYPE_" ++ 
+               let t = customTypeName targetType in
+                   case targetType of
+                     VARIABLE_TYPE_INT -> "INT"
+                     VARIABLE_TYPE_FLOAT -> "FLOAT"
+                     VARIABLE_TYPE_STRING -> "STRING"
+                     VARIABLE_TYPE_CUSTOM name -> name
+     return dieKey
 
 lookupAbbreviation :: [Char] -> CodeTransformation (DWARFAbbreviation)
 lookupAbbreviation key =
@@ -2518,87 +2704,68 @@ addIntrinsicTypeDIEs =
      fileName <- gets (configSourceFileName . semanticStateConfig)
      stringOffset <- addDWARFString "idlewild-lang"
      fileNameStringOffset <- addDWARFString fileName
-     compDirStringOffset <- addDWARFString "the government are watching me; they're putting things in my tea!"
-     
-     addDWARFDIE
-       (dwarfCreateDIE
-        "__DIE_COMPILE_UNIT"
-         compileUnitAbbreviation
-         0
-         -- (abbreviationCode baseTypeAbbreviation)
-         [DWARFAttributeRefStrp (fromIntegral stringOffset),
-          DWARFAttributeData1UnsignedInt 0xC, -- C99
-          DWARFAttributeRefStrp (fromIntegral fileNameStringOffset),
-          DWARFAttributeRefStrp (fromIntegral compDirStringOffset), --comp dir
-          DWARFAttributeAddr 0, -- lo pc
-          DWARFAttributeData8UnsignedInt 0, -- hi pc
-          DWARFAttributeRef4 0 -- sec offset (position of line numbers in .debug_line)
-          ])
+     compDirStringOffset <- addDWARFString "the government are watching me; they're putting things in my tea."
 
-     --modifyDWARFDIEOffset 1
+     addDWARFDIE
+       "__DIE_COMPILE_UNIT"
+         compileUnitAbbreviation
+         [DWARFAttribute4 (show stringOffset),
+          DWARFAttribute1 "0xc", -- C99
+          DWARFAttribute4 (show fileNameStringOffset),
+          DWARFAttribute4 (show compDirStringOffset), --comp dir
+          DWARFAttribute8 "DBG_MAIN", -- lo pc
+          DWARFAttribute8 "DBG_TEXT_ENDS", -- hi pc
+          DWARFAttribute4 "0" -- sec offset (position of line numbers in .debug_line)
+          ]
 
      stringOffset <- addDWARFString "int"
      addDWARFDIE
-       (dwarfCreateDIE
-        "__DIE_BASE_TYPE_INT"
+       "__DIE_BASE_TYPE_INT"
          baseTypeAbbreviation
-         0
-         -- (abbreviationCode baseTypeAbbreviation)
-         [DWARFAttributeData1UnsignedInt 8,
-          DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_signed")),
-          DWARFAttributeRefStrp (fromIntegral stringOffset)])
+         [DWARFAttribute1 "8",
+          DWARFAttribute1 (show (dwarfStringToAttributeEncoding "DW_ATE_signed")),
+          DWARFAttribute4 (show stringOffset)]
 
      stringOffset <- addDWARFString "float"
      addDWARFDIE
-       (dwarfCreateDIE
-        "__DIE_BASE_TYPE_FLOAT"
+       "__DIE_BASE_TYPE_FLOAT"
         baseTypeAbbreviation
-        0
-        --(abbreviationCode baseTypeAbbreviation)
-        [DWARFAttributeData1UnsignedInt 8,
-         DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_float")),
-         DWARFAttributeRefStrp (fromIntegral stringOffset)])
+        [DWARFAttribute1 "8",
+         DWARFAttribute1 (show (dwarfStringToAttributeEncoding "DW_ATE_float")),
+         DWARFAttribute4 (show stringOffset)]
      
      stringOffset <- addDWARFString "char"
      addDWARFDIE
-       (dwarfCreateDIE
-        "__DIE_BASE_TYPE_CHAR"
+       "__DIE_BASE_TYPE_CHAR"
         baseTypeAbbreviation
-        0
-        -- (abbreviationCode baseTypeAbbreviation)
-        [DWARFAttributeData1UnsignedInt 1,
-         DWARFAttributeData1UnsignedInt (fromIntegral (dwarfStringToAttributeEncoding "DW_ATE_signed_char")),
-         DWARFAttributeRefStrp (fromIntegral stringOffset)])
+        [DWARFAttribute1 "1",
+         DWARFAttribute1 (show (dwarfStringToAttributeEncoding "DW_ATE_signed_char")),
+         DWARFAttribute4 (show stringOffset)]
 
-     dwarfDIEs <- gets (debugInfoDIEs . semanticStateDebugInfo)
-     let charCrossReference = dwarfDIEOffset (fromJust (Map.lookup "__DIE_BASE_TYPE_CHAR" dwarfDIEs))
      addDWARFDIE
-       (dwarfCreateDIE
-        "__DIE_BASE_TYPE_STRING"
+       "__DIE_BASE_TYPE_STRING"
         pointerTypeAbbreviation
-        0
-        -- (abbreviationCode pointerTypeAbbreviation)
-        [DWARFAttributeData1UnsignedInt 8,
-         DWARFDIECrossReference charCrossReference])
-         
-modifyDWARFDIEOffset :: Int -> CodeTransformation ()
-modifyDWARFDIEOffset n =
-  do state <- get
-     debugInfo <- gets semanticStateDebugInfo
-     offset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
-     put state {semanticStateDebugInfo =
-                debugInfo {debugInfoDIEOffset = offset + n}}
+        [DWARFAttribute1 "8",
+         DWARFCrossReferenceAttribute "__DIE_BASE_TYPE_CHAR"]
 
-addDWARFDIE :: (Int -> DWARFDIE) -> CodeTransformation ()
-addDWARFDIE partialDIE =
-  do state <- get
-     debugInfo <- gets semanticStateDebugInfo
-     let offset = debugInfoDIEOffset debugInfo
-         die = partialDIE offset
-         dies = debugInfoDIEs debugInfo
-     put state {semanticStateDebugInfo =
-                  debugInfo {debugInfoDIEs = Map.insert (dwarfDIEKey die) die dies,
-                             debugInfoDIEOffset = offset + dwarfDIECalculateSize die}}
+     addDWARFDIE
+       "__DIE_POINTER_TYPE_INT"
+        pointerTypeAbbreviation
+        [DWARFAttribute1 "8",
+         DWARFCrossReferenceAttribute "__DIE_BASE_TYPE_INT"]
+
+     addDWARFDIE
+       "__DIE_POINTER_TYPE_FLOAT"
+        pointerTypeAbbreviation
+        [DWARFAttribute1 "8",
+         DWARFCrossReferenceAttribute "__DIE_BASE_TYPE_FLOAT"]
+        
+     addDWARFDIE
+       "__DIE_POINTER_TYPE_STRING"
+        pointerTypeAbbreviation
+        [DWARFAttribute1 "8",
+         DWARFCrossReferenceAttribute "__DIE_BASE_TYPE_STRING"]
+
 
 addDWARFString :: [Char] -> CodeTransformation (Int)
 addDWARFString value =
@@ -2611,56 +2778,156 @@ addDWARFString value =
                                                     debugInfoStringOffset = updatedOffset}}
      return offset
 
-putDWARFVariable :: [Char] -> VariableType -> CodeTransformation ()
-putDWARFVariable name dataType =
+putDWARFVariable :: Symbol -> CodeTransformation ()
+putDWARFVariable (Variable {variableName = name,
+                            variableType = dataType,
+                            variableLineNumber = lineNumber}) =
   do abbreviation <- lookupAbbreviation "__ABBREV_VARIABLE"
      crossReference <- variableTypeToDWARFCrossReference dataType
      stringOffset <- addDWARFString (removeTypeTag name)
-     
-     addDWARFDIE (dwarfCreateDIE
-                  ("__DIE_VARIABLE_" ++ (removeTypeTag name))
-                  -- (abbreviationCode abbreviation)
-                   abbreviation
-                   0
-                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
-                     DWARFAttributeData2UnsignedInt 0,
-                     DWARFAttributeData4UnsignedInt 88,
-                     DWARFDIECrossReference crossReference])
+     fileName <- gets (head . semanticStateIncludeFileNameStack)
+     includeFileNames <- gets semanticStateIncludeFileNames
+     symbols <- gets semanticStateSymbols
+     localSymbols <- gets semanticStateLocalSymbols
+     nameSpace <- gets semanticStateNameSpace
+           
+     let dwarfExpression = "0x3\n dq " ++ decorateVariableName name symbols localSymbols nameSpace ++ "\n"
+         dwarfExpressionByteLength = 9-- 1 + frameBaseOffsetByteLength
+         encodedDWARFExpressionByteLength = encodeUnsignedLEB128 dwarfExpressionByteLength
+         byteLengthAsm = unsignedLEB128ToString encodedDWARFExpressionByteLength
+          
+     addDWARFDIE
+       ("__DIE_VARIABLE_" ++ (removeTypeTag name))
+        abbreviation
+         [DWARFAttribute4 (show stringOffset),
+          DWARFAttribute2 "0",
+          DWARFAttribute4 (show lineNumber),
+          DWARFCrossReferenceAttribute crossReference,
+          DWARFVariableLengthAttribute 10 (byteLengthAsm ++ ", " ++ dwarfExpression)]
 
+putDWARFVariable (Array {arrayName = name,
+                         arrayType = dataType,
+                         arrayLineNumber = lineNumber}) =
+                         
+  do abbreviation <- lookupAbbreviation "__ABBREV_ARRAY"
+     crossReference <- variableTypeToDWARFCrossReference dataType
+     stringOffset <- addDWARFString (removeTypeTag name)
+     fileName <- gets (head . semanticStateIncludeFileNameStack)
+     includeFileNames <- gets semanticStateIncludeFileNames
+     symbols <- gets semanticStateSymbols
+     localSymbols <- gets semanticStateLocalSymbols
+     nameSpace <- gets semanticStateNameSpace
+           
+     let dwarfExpression = "0x3\n dq " ++ decorateVariableName name symbols localSymbols nameSpace ++ "\n"
+         dwarfExpressionByteLength = 9
+         encodedDWARFExpressionByteLength = encodeUnsignedLEB128 dwarfExpressionByteLength
+         byteLengthAsm = unsignedLEB128ToString encodedDWARFExpressionByteLength
+          
+     addDWARFDIE
+       ("__DIE_ARRAY_" ++ (removeTypeTag name))
+        abbreviation
+         [DWARFAttribute4 (show stringOffset),
+          DWARFAttribute2 "0",
+          DWARFAttribute4 (show lineNumber),
+          DWARFCrossReferenceAttribute crossReference,
+          DWARFVariableLengthAttribute 10 (byteLengthAsm ++ ", " ++ dwarfExpression)]
+
+putDWARFLocalAutomaticVariable :: Symbol -> Symbol -> CodeTransformation ()
+putDWARFLocalAutomaticVariable function localAutomaticVariable =
+  do let (abbreviationKey,dieKey) =
+          if localAutomaticVariableIsArgument localAutomaticVariable
+          then ("__ABBREV_PARAMETER","__DIE_PARAMETER")
+          else ("__ABBREV_LOCAL_AUTOMATIC","__DIE_LOCAL_AUTOMATIC")
+     abbreviation <- lookupAbbreviation abbreviationKey
+     stringOffset <- addDWARFString (removeTypeTag (localAutomaticVariableName localAutomaticVariable))
+     crossReference <- variableTypeToDWARFCrossReference (localAutomaticVariableType localAutomaticVariable)
+     fileName <- gets (head . semanticStateIncludeFileNameStack)
+     includeFileNames <- gets semanticStateIncludeFileNames
+     
+     
+     let frameBaseOffset = encodeSignedLEB128 (localAutomaticVariableAddress localAutomaticVariable - 16)
+         frameBaseOffsetByteLength = length (sLEB128 frameBaseOffset)
+         
+         dwarfExpression = "0x91, " ++ signedLEB128ToString frameBaseOffset
+         dwarfExpressionByteLength = 1 + frameBaseOffsetByteLength
+         encodedDWARFExpressionByteLength = encodeUnsignedLEB128 dwarfExpressionByteLength
+         byteLengthAsm = unsignedLEB128ToString encodedDWARFExpressionByteLength
+     
+     addDWARFDIE
+       (dieKey ++ (functionName function) ++ "_" ++ (localAutomaticVariableName localAutomaticVariable))
+        abbreviation
+        [DWARFAttribute4 (show stringOffset),
+         DWARFAttribute2 (show (fromJust (elemIndex fileName includeFileNames))),
+         DWARFAttribute4 (show (localAutomaticVariableLineNumber localAutomaticVariable)),
+         DWARFCrossReferenceAttribute crossReference,
+         DWARFVariableLengthAttribute (1 + dwarfExpressionByteLength) (byteLengthAsm ++ ", " ++ dwarfExpression)] -- exprloc
+     
 putDWARFType :: Symbol -> CodeTransformation ()
 putDWARFType customType =
   do abbreviation <- lookupAbbreviation "__ABBREV_CUSTOM_TYPE"
      stringOffset <- addDWARFString (removeTypeTag (typeName customType))
-     o <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
-     addDWARFDIE (dwarfCreateDIE
-                   ("__DIE_CUSTOM_TYPE_" ++ (typeName customType))
-                    abbreviation
-                    0
-                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
-                     DWARFAttributeData4UnsignedInt (8 * fromIntegral (typeSize customType)),
-                     DWARFAttributeData2UnsignedInt 0,
-                     DWARFAttributeData4UnsignedInt 0])
-                     --DWARFAttributeRef4 (fromIntegral (o + 18 + (Map.size (typeSymbols customType) * 19 )))])
+     symbols <- gets semanticStateSymbols
 
+     addDWARFDIE
+       ("__DIE_CUSTOM_TYPE_" ++ (typeName customType))
+        abbreviation
+        [DWARFAttribute4 (show stringOffset),
+         DWARFAttribute4 (show (8 * fromIntegral (typeSize customType))),
+         DWARFAttribute2 "0",
+         DWARFAttribute4 "0"]
+                     
      mapM_ (putDWARFTypeField customType) (typeSymbols customType)
-     modifyDWARFDIEOffset 1
-     
+     addDWARFNullDIE
+         
+     abbreviation <- lookupAbbreviation "__ABBREV_POINTER_TYPE"
+
+     addDWARFDIE
+       ("__DIE_POINTER_TYPE_" ++ typeName customType)
+        abbreviation
+        [DWARFAttribute1 "8",
+         DWARFCrossReferenceAttribute ("__DIE_CUSTOM_TYPE_" ++ typeName customType)]
+
 putDWARFTypeField :: Symbol -> Symbol -> CodeTransformation ()
 putDWARFTypeField customType field =
   do abbreviation <- lookupAbbreviation "__ABBREV_MEMBER"
      stringOffset <- addDWARFString (removeTypeTag (fieldName field))
      crossReference <- variableTypeToDWARFCrossReference (fieldType field)
-     liftIO $ putStrLn ("sha la la " ++ fieldName field)
-     addDWARFDIE (dwarfCreateDIE
-                   ("__DIE_CUSTOM_TYPE_FIELD_" ++ (typeName customType) ++ "_" ++ (fieldName field))
-                    abbreviation
-                    1
-                    [DWARFAttributeRefStrp (fromIntegral stringOffset),
-                     DWARFAttributeData2UnsignedInt 0,
-                     DWARFAttributeData4UnsignedInt 0,
-                     DWARFAttributeRef4 (fromIntegral crossReference),
-                     DWARFAttributeData4UnsignedInt (fromIntegral (8 * fieldOffset field))])
-                     
+     
+     addDWARFDIE
+       ("__DIE_CUSTOM_TYPE_FIELD_" ++ (typeName customType) ++ "_" ++ (fieldName field))
+        abbreviation
+        [DWARFAttribute4 (show stringOffset),
+         DWARFAttribute2 "0",
+         DWARFAttribute4 "0",
+         DWARFCrossReferenceAttribute crossReference,
+         DWARFAttribute4 (show (8 * fieldOffset field))]
+     
+putDWARFFunction :: Symbol -> CodeTransformation ()
+putDWARFFunction function =
+  do 
+     abbreviation <- lookupAbbreviation "__ABBREV_FUNCTION"
+     stringOffset <- addDWARFString (removeTypeTag (functionName function))
+     crossReference <- variableTypeToDWARFCrossReference (functionType function)
+     dieOffset <- gets (debugInfoDIEOffset . semanticStateDebugInfo)
+     
+     addDWARFDIE
+       ("__DIE_FUNCTION_" ++ (functionName function))
+        abbreviation
+        [DWARFAttribute4 (show stringOffset),
+         DWARFAttribute2 "0",
+         DWARFAttribute4 "0",
+         DWARFCrossReferenceAttribute crossReference,
+         DWARFAttribute8 ("DBG_BEGIN_" ++ (functionName function)), --lo pc
+         DWARFAttribute8 ("DBG_END_" ++ (functionName function)), -- hi pc
+         DWARFAttribute2 "0x9c01" --exprloc
+         ]
+     
+
+     let symbols = map snd (sortBy (comparing (localAutomaticVariableIndex . snd)) (Map.toAscList (functionSymbols function)))
+     
+     mapM_ (putDWARFLocalAutomaticVariable function) symbols
+     addDWARFNullDIE
+     
 throwSemanticError :: String -> Statement -> CodeTransformation ()
 throwSemanticError msg (Statement {statementLineNumber = lineNumber,
                                    statementOffset = offset}) =

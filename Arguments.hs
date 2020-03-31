@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -104,8 +104,8 @@ processArguments =
      arguments <- gets argumentStateArguments
      (options, nonOptions) <- liftIO $ processOptions customisedOptions arguments
 
-     if optionShowVersion options == True -- || optionVerbose options
-     then do liftIO $ putStrLn "Idlewild-Lang version 0.0.3."
+     if optionShowVersion options == True
+     then do liftIO $ putStrLn "Idlewild-Lang version 0.0.5."
              liftIO $ exitSuccess
      else return ()
 
@@ -122,7 +122,7 @@ processArguments =
          objectFileName = replaceExtension sourceFileName ".obj"
 #endif
          verbose = optionVerbose options
-
+     
      fromHandle <- liftIO $ openFile sourceFileName ReadMode
      toHandle <- liftIO $ openFile asmFileName WriteMode
 
@@ -132,6 +132,7 @@ processArguments =
          {lexStateID = LEX_PENDING,
           lexStateIncludeFileDepth = 0,
           lexStateIncludeFileNameStack = [sourceFileName],
+          lexStateIncludeFileNames = [],
           lexStateCurrentToken = emptyToken,
           lexStatePendingTokens = Seq.empty,
           lexStateTokens = Seq.singleton (createBOFToken sourceFileName),

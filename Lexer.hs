@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -65,6 +65,7 @@ tokeniseCode =
        if done
        then do depth <- gets lexStateIncludeFileDepth
                stack <- gets lexStateIncludeFileNameStack
+               
                if depth == 0
                then do tokens <- gets lexStateTokens
                        config <- gets lexStateConfig
@@ -73,7 +74,8 @@ tokeniseCode =
                        let sentinel = Token TOKEN_NONE "" lineNumber offset
                            
        
-                       put ParseState {parseStateIncludeFileNameStack = stack,
+                       put ParseState {parseStateIncludeFileNameStack = [],
+                                       parseStateIncludeFileNames = [],
                                        parseStateTree = EmptyStatement,
                                        parseStateTokens = (Foldable.toList (tokens Seq.|> sentinel)),
                                        parseStateInFunction = False,
@@ -102,6 +104,7 @@ tokeniseCode =
                                 {lexStateID = LEX_PENDING,
                                  lexStateIncludeFileDepth = lexStateIncludeFileDepth cachedState + 1,
                                  lexStateIncludeFileNameStack = sourceFileName:(lexStateIncludeFileNameStack cachedState),
+                                 lexStateIncludeFileNames = sourceFileName:(lexStateIncludeFileNames cachedState),
                                  lexStateCurrentToken = emptyToken,
                                  lexStatePendingTokens = Seq.empty,
                                  lexStateTokens = Seq.singleton tokenBOF,
@@ -186,18 +189,6 @@ resetLexState :: CodeTransformation ()
 resetLexState =
         do state <- get
            put state {lexStateID = LEX_PENDING, lexStateCurrentToken = emptyToken}
-
-lexerPushIncludeFileName :: String -> CodeTransformation ()
-lexerPushIncludeFileName fileName =
-  do state <- get
-     put $ state {lexStateIncludeFileNameStack =
-                  (fileName:lexStateIncludeFileNameStack state)}
-
-lexerPopIncludeFileName :: CodeTransformation ()
-lexerPopIncludeFileName =
-  do state <- get
-     put $ state {lexStateIncludeFileNameStack =
-                  tail (lexStateIncludeFileNameStack state)}
 
 removeQuotes :: String -> String
 removeQuotes string = take ((length string) - 2) (tail string)

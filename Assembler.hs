@@ -1,6 +1,6 @@
 {--
 
-Copyright (c) 2014-2017, Clockwork Dev Studio
+Copyright (c) 2014-2020, Clockwork Dev Studio
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
@@ -39,6 +39,7 @@ import System.FilePath.Posix
 
 import Data.Maybe
 import Data.List
+import Debug.Trace
 import Control.Monad.State
 import Control.Monad.Except
 import Control.Monad.Identity
@@ -54,23 +55,21 @@ assemble =
          outputFile = configOutputFile config
          options = configOptions config
          verbose = optionVerbose options
-     
+
      liftIO $ hPutStr outputFile (concat code)
      liftIO $ hClose inputFile
      liftIO $ hClose outputFile
-
+     
      verboseCommentary ("Assembling...\n") verbose
      verboseCommentary ("(Assembler backend is '" ++ optionAssembler options ++ "')\n") verbose
      
      case optionAssembler options  of
           "fasm" ->
             do
-#if LINUX==1
-               let fasmPath = "/usr/bin/fasm"
-#elif MAC_OS==1
-               let fasmPath = "/usr/local/bin/fasm"
+#if LINUX==1 || MAC_OS==1
+               let fasmPath = IWL_HOME ++ "/fasm"
 #elif WINDOWS==1
-               let fasmPath = "C:\\\\Program Files\\Idlewild-Lang\\fasm.exe" 
+               let fasmPath = IWL_HOME ++ "\\fasm.exe" 
 #endif
                verboseCommentary ("fasm " ++ asmFileName ++ "\n") verbose
                (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode fasmPath [asmFileName] ""
@@ -83,20 +82,22 @@ assemble =
 
             do 
 #if LINUX==1
-               let nasmPath = "/usr/bin/nasm"
-                   nasmOptions = [asmFileName, "-o", objectFileName, "-f", "elf64"]
+               let nasmPath = IWL_HOME ++ "/nasm"
+                   nasmOptions = [asmFileName, "--discard-labels","-o", objectFileName, "-f", "elf64"]
 #elif MAC_OS==1
-               let nasmPath = "/usr/local/bin/nasm"
+               let nasmPath = IWL_HOME ++ "/nasm"
                    nasmOptions = [asmFileName, "-o", objectFileName, "-f", "macho64"]
 #elif WINDOWS==1
-               let nasmPath = "C:\\Program Files\\Idlewild-Lang\\nasm.exe"
+               let nasmPath = IWL_HOME ++ "\\nasm.exe"
                    nasmOptions = [asmFileName, "-o", objectFileName, "-f", "win64"]
 #endif
-               verboseCommentary ("nasm " ++ (concat (intersperse " " nasmOptions)) ++ "\n") verbose
+               verboseCommentary (IWL_HOME ++ "/nasm " ++ (concat (intersperse " " nasmOptions)) ++ "\n") verbose
                (exit, stdout, stderr) <- liftIO $ readProcessWithExitCode nasmPath nasmOptions ""
                case exit of
                     (ExitFailure n) -> do liftIO $ putStrLn (stderr ++ "\nAssembler error (nasm, code " ++ (show n) ++ ").")
                                           liftIO $ exitFailure
                     _ -> return ()
-          
-     put LinkState {linkStateConfig = config}
+     
+     debugInfo <- gets asmStateDebugInfo
+     put LinkState {linkStateDebugInfo = debugInfo,
+                    linkStateConfig = config}
